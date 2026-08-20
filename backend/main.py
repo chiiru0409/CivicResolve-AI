@@ -69,6 +69,9 @@ app = FastAPI(
     title="CivicResolve AI",
     description="AI-powered civic complaint management API",
     version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
 
 router = APIRouter()
@@ -78,13 +81,13 @@ cors_origins_env = os.getenv("CORS_ORIGINS")
 allowed_origins = (
     [orig.strip() for orig in cors_origins_env.split(",") if orig.strip()]
     if cors_origins_env
-    else ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
+    else ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "https://civic-resolve-ai-seven.vercel.app"]
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"https?://.*" if not cors_origins_env else None,
+    allow_origin_regex=r"^https?:\/\/([a-zA-Z0-9-]+\.)*(vercel\.app|localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -847,6 +850,22 @@ def handle_voice_turn(
 app.include_router(router)
 app.include_router(router, prefix="/api")
 
+
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import JSONResponse
+
+@app.get("/docs", include_in_schema=False)
+@app.get("/api/docs", include_in_schema=False)
+def swagger_ui():
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title="CivicResolve AI - Swagger API Docs",
+    )
+
+@app.get("/openapi.json", include_in_schema=False)
+@app.get("/api/openapi.json", include_in_schema=False)
+def openapi_endpoint():
+    return JSONResponse(content=app.openapi())
 
 @app.get("/")
 @app.get("/api")
