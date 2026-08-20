@@ -11,15 +11,11 @@
  *   so AuthContext can react without a direct import cycle.
  */
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+const BASE_URL = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
 
-/** True when a backend URL is configured or when deployed in production (e.g. Vercel). */
+/** Backend is the single source of truth */
 export function isBackendAvailable(): boolean {
-  if (BASE_URL.length > 0) return true;
-  if (import.meta.env.PROD) return true;
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return true;
-  if (import.meta.env.VITE_USE_BACKEND === 'true') return true;
-  return false;
+  return true;
 }
 
 /** Read the JWT from localStorage. */

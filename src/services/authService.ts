@@ -221,68 +221,62 @@ export async function register(data: {
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
   const cleanEmail = email.trim().toLowerCase();
-  if (isBackendAvailable()) {
-    try {
-      const res = await api.post<TokenResponse>('/auth/login', { email: cleanEmail, password });
-      if (res && res.access_token) {
-        storeToken(res.access_token);
-        return res;
-      }
-      throw new Error('Invalid authentication response from server.');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
-        throw err;
-      }
+  try {
+    const res = await api.post<TokenResponse>('/auth/login', { email: cleanEmail, password });
+    if (res && res.access_token) {
+      storeToken(res.access_token);
+      return res;
     }
+    throw new Error('Invalid authentication response from server.');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
+      throw err;
+    }
+    // Offline fallback only when backend is unreachable
+    const users = getDemoUsers();
+    const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (!user || user.password !== password) {
+      throw new Error('Incorrect email or password.');
+    }
+    if (user.role === 'admin') {
+      throw new Error('Please use the Authority login page for admin access.');
+    }
+    const token = buildDemoToken(user);
+    storeToken(token);
+    return buildTokenResponse(user, token);
   }
-
-  // Demo fallback
-  const users = getDemoUsers();
-  const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
-  if (!user || user.password !== password) {
-    throw new Error('Incorrect email or password.');
-  }
-  if (user.role === 'admin') {
-    throw new Error('Please use the Authority login page for admin access.');
-  }
-  const token = buildDemoToken(user);
-  storeToken(token);
-  return buildTokenResponse(user, token);
 }
 
-// ── Admin Login ───────────────────────────────────────────────────────────────
+// ── Admin Login (Backend is Single Source of Truth) ───────────────────────────
 
 export async function adminLogin(email: string, password: string): Promise<TokenResponse> {
   const cleanEmail = email.trim().toLowerCase();
-  if (isBackendAvailable()) {
-    try {
-      const res = await api.post<TokenResponse>('/auth/admin/login', { email: cleanEmail, password });
-      if (res && res.access_token) {
-        storeToken(res.access_token);
-        return res;
-      }
-      throw new Error('Invalid authentication response from server.');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
-        throw err;
-      }
+  try {
+    const res = await api.post<TokenResponse>('/auth/admin/login', { email: cleanEmail, password });
+    if (res && res.access_token) {
+      storeToken(res.access_token);
+      return res;
     }
+    throw new Error('Invalid authentication response from server.');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
+      throw err;
+    }
+    // Offline fallback only when server is completely down / network error
+    const users = getDemoUsers();
+    const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (!user || user.password !== password) {
+      throw new Error('Incorrect credentials.');
+    }
+    if (user.role !== 'admin') {
+      throw new Error('Not an authority account.');
+    }
+    const token = buildDemoToken(user);
+    storeToken(token);
+    return buildTokenResponse(user, token);
   }
-
-  // Demo fallback — only admin@civicresolve.ai / admin123
-  const users = getDemoUsers();
-  const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
-  if (!user || user.password !== password) {
-    throw new Error('Incorrect credentials.');
-  }
-  if (user.role !== 'admin') {
-    throw new Error('Not an authority account.');
-  }
-  const token = buildDemoToken(user);
-  storeToken(token);
-  return buildTokenResponse(user, token);
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────
