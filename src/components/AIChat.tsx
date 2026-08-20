@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageSquare, X, Send, Bot, User, Loader2,
   PlusCircle, Minimize2, RotateCcw,
-  MapPin, CheckCircle, ChevronRight,
+  MapPin, CheckCircle, ChevronRight, Zap,
 } from 'lucide-react';
 import { getChatResponse, resetChatState } from '../services/aiService';
 import type { ChatMessage } from '../types';
