@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -71,6 +71,8 @@ app = FastAPI(
     version="1.0.0",
 )
 
+router = APIRouter()
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
 cors_origins_env = os.getenv("CORS_ORIGINS")
 allowed_origins = (
@@ -89,31 +91,35 @@ app.add_middleware(
 )
 
 
+# ── Immediate DB Initialization (essential for Vercel Serverless cold starts) ──
+def _ensure_initialized():
+    try:
+        init_db()
+        conn = get_connection()
+        try:
+            with conn:
+                conn.execute(CREATE_USERS_TABLE)
+                conn.execute(CREATE_USERS_INDEX)
+                try:
+                    conn.execute(ADD_CITIZEN_ID_COLUMN)
+                    conn.execute(ADD_CITIZEN_ID_INDEX)
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+        seed_admin()
+    except Exception as e:
+        logger.warning("DB init: %s", e)
+
+_ensure_initialized()
+
+
 # ── Startup ───────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
-    # 1. Create tables, indexes, seed departments
-    init_db()
+    _ensure_initialized()
 
-    # 2. Add users table (auth.py owns this DDL)
-    conn = get_connection()
-    try:
-        with conn:
-            conn.execute(CREATE_USERS_TABLE)
-            conn.execute(CREATE_USERS_INDEX)
-            # Safe migration: add citizen_id to complaints
-            try:
-                conn.execute(ADD_CITIZEN_ID_COLUMN)
-                conn.execute(ADD_CITIZEN_ID_INDEX)
-            except Exception:
-                pass  # column already exists
-    finally:
-        conn.close()
-
-    # 3. Seed default admin
-    seed_admin()
-
-    # 4. Mount uploads as static
+    # Mount uploads as static
     uploads_path = UPLOADS_COMPLAINTS_DIR.parent
     if uploads_path.exists():
         app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
@@ -204,7 +210,7 @@ def _build_initial_updates(complaint_id: str, category: str, priority: str, depa
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/auth/register", response_model=TokenResponse, status_code=201)
+@router.post("/auth/register", response_model=TokenResponse, status_code=201)
 def register(body: UserRegister):
     user = create_user(body.full_name, body.email, body.phone, body.password, role="citizen")
     token = create_token(user)
@@ -214,7 +220,7 @@ def register(body: UserRegister):
     )
 
 
-@app.post("/auth/login", response_model=TokenResponse)
+@router.post("/auth/login", response_model=TokenResponse)
 def login(body: UserLogin):
     user = get_user_by_email(body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
@@ -228,7 +234,7 @@ def login(body: UserLogin):
     )
 
 
-@app.post("/auth/admin/login", response_model=TokenResponse)
+@router.post("/auth/admin/login", response_model=TokenResponse)
 def admin_login(body: AdminLogin):
     user = get_user_by_email(body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
@@ -242,7 +248,7 @@ def admin_login(body: AdminLogin):
     )
 
 
-@app.get("/auth/me", response_model=UserOut)
+@router.get("/auth/me", response_model=UserOut)
 def get_me(current_user: dict = Depends(require_citizen)):
     user = get_user_by_id(int(current_user["sub"]))
     if not user:
@@ -250,7 +256,7 @@ def get_me(current_user: dict = Depends(require_citizen)):
     return user
 
 
-@app.put("/auth/profile", response_model=UserOut)
+@router.put("/auth/profile", response_model=UserOut)
 def update_profile(body: ProfileUpdate, current_user: dict = Depends(require_citizen)):
     user = update_user_profile(int(current_user["sub"]), body.full_name, body.phone)
     if not user:
@@ -262,7 +268,7 @@ def update_profile(body: ProfileUpdate, current_user: dict = Depends(require_cit
 # CITIZEN COMPLAINT ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/complaints", status_code=201)
+@router.post("/complaints", status_code=201)
 def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require_citizen)):
     citizen_id = int(current_user["sub"])
 
@@ -336,7 +342,7 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
         conn.close()
 
 
-@app.post("/complaints/{complaint_id}/image")
+@router.post("/complaints/{complaint_id}/image")
 async def upload_image(
     complaint_id: str,
     file: UploadFile = File(...),
@@ -371,7 +377,7 @@ async def upload_image(
         conn.close()
 
 
-@app.get("/complaints/mine")
+@router.get("/complaints/mine")
 def get_my_complaints(current_user: dict = Depends(require_citizen)):
     citizen_id = int(current_user["sub"])
     conn = get_connection()
@@ -391,7 +397,7 @@ def get_my_complaints(current_user: dict = Depends(require_citizen)):
         conn.close()
 
 
-@app.get("/complaints/{complaint_id}")
+@router.get("/complaints/{complaint_id}")
 def get_my_complaint_detail(complaint_id: str, current_user: dict = Depends(require_citizen)):
     citizen_id = int(current_user["sub"])
     conn = get_connection()
@@ -414,7 +420,7 @@ def get_my_complaint_detail(complaint_id: str, current_user: dict = Depends(requ
 # PUBLIC TRACKING ROUTE
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/track/{complaint_number}")
+@router.get("/track/{complaint_number}")
 def track_complaint(complaint_number: str):
     conn = get_connection()
     try:
@@ -455,7 +461,7 @@ def track_complaint(complaint_number: str):
 # ADMIN ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/admin/complaints")
+@router.get("/admin/complaints")
 def admin_list_complaints(
     search:     Optional[str] = Query(None),
     category:   Optional[str] = Query(None),
@@ -502,7 +508,7 @@ def admin_list_complaints(
         conn.close()
 
 
-@app.get("/admin/complaints/{complaint_id}")
+@router.get("/admin/complaints/{complaint_id}")
 def admin_get_complaint(complaint_id: str, current_user: dict = Depends(require_admin)):
     conn = get_connection()
     try:
@@ -516,7 +522,7 @@ def admin_get_complaint(complaint_id: str, current_user: dict = Depends(require_
         conn.close()
 
 
-@app.patch("/admin/complaints/{complaint_id}/status")
+@router.patch("/admin/complaints/{complaint_id}/status")
 def admin_update_status(
     complaint_id: str,
     body: StatusUpdate,
@@ -550,7 +556,7 @@ def admin_update_status(
         conn.close()
 
 
-@app.post("/admin/complaints/{complaint_id}/assign")
+@router.post("/admin/complaints/{complaint_id}/assign")
 def admin_assign_complaint(
     complaint_id: str,
     body: AssignmentCreate,
@@ -588,7 +594,7 @@ def admin_assign_complaint(
         conn.close()
 
 
-@app.get("/admin/analytics")
+@router.get("/admin/analytics")
 def admin_analytics(current_user: dict = Depends(require_admin)):
     conn = get_connection()
     try:
@@ -625,7 +631,7 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
         conn.close()
 
 
-@app.get("/admin/departments")
+@router.get("/admin/departments")
 def admin_departments(current_user: dict = Depends(require_admin)):
     import json as _json
     conn = get_connection()
@@ -643,7 +649,7 @@ def admin_departments(current_user: dict = Depends(require_admin)):
         conn.close()
 
 
-@app.get("/llm/status")
+@router.get("/llm/status")
 def llm_status():
     """Check if Ollama and the configured model are available."""
     try:
@@ -653,7 +659,7 @@ def llm_status():
         return {"available": False, "error": str(e)}
 
 
-@app.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse)
 def handle_chat(body: ChatRequest):
     """
     Intelligent chatbot endpoint for civic complaints.
@@ -754,7 +760,7 @@ def handle_chat(body: ChatRequest):
     )
 
 
-@app.post("/voice/turn", response_model=VoiceTurnResponse)
+@router.post("/voice/turn", response_model=VoiceTurnResponse)
 def handle_voice_turn(
     body: VoiceTurnRequest,
     authorization: Optional[str] = Header(None),
@@ -788,9 +794,22 @@ def handle_voice_turn(
     return VoiceTurnResponse(**result)
 
 
+# ── Mount all routes at BOTH root AND /api ─────────────────────────────────────
+app.include_router(router)
+app.include_router(router, prefix="/api")
+
+
 @app.get("/")
-def root():
-    return {"message": "CivicResolve AI Backend", "version": "1.0.0", "status": "running"}
+@app.get("/api")
+@app.get("/health")
+@app.get("/api/health")
+def root_health():
+    return {
+        "status": "healthy",
+        "service": "CivicResolve AI API",
+        "version": "1.0.0",
+        "environment": "production" if os.getenv("VERCEL") else "development",
+    }
 
 
 if __name__ == "__main__":
