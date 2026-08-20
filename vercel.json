@@ -3,51 +3,51 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/api",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/health",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/auth/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/complaints/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/complaints",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/voice/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/track/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/chat",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/departments/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/departments",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/uploads/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api"
     },
     {
       "source": "/(.*)",
