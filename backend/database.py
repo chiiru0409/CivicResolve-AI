@@ -31,11 +31,21 @@ UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
 
 # In Vercel Serverless environment, local filesystem is read-only except /tmp
 if os.environ.get("VERCEL"):
+    import shutil
     DB_DIR = Path("/tmp/database")
     DB_PATH = DB_DIR / "civic.db"
     UPLOADS_DIR = Path("/tmp/uploads")
     UPLOADS_COMPLAINTS_DIR = UPLOADS_DIR / "complaints"
     UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
+    try:
+        DB_DIR.mkdir(parents=True, exist_ok=True)
+        UPLOADS_COMPLAINTS_DIR.mkdir(parents=True, exist_ok=True)
+        UPLOADS_RESOLUTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        bundled_db = _PROJECT_ROOT / "database" / "civic.db"
+        if not DB_PATH.exists() and bundled_db.exists():
+            shutil.copy2(bundled_db, DB_PATH)
+    except Exception as exc:
+        logger.warning("Vercel /tmp directory setup: %s", exc)
 
 
 # ── DDL statements ─────────────────────────────────────────────────────────────

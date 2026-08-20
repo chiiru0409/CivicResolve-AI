@@ -57,9 +57,10 @@ function getDemoUsers(): DemoUser[] {
   try {
     const stored = localStorage.getItem(USERS_KEY);
     const users: DemoUser[] = stored ? (JSON.parse(stored) as DemoUser[]) : [];
-    // Ensure default admin always exists
-    if (!users.find((u) => u.role === 'admin')) {
-      users.push({
+    // Ensure default admin always exists and has valid password
+    let admin = users.find((u) => u.role === 'admin' || u.email.toLowerCase() === 'admin@civicresolve.ai');
+    if (!admin) {
+      admin = {
         id: 1,
         full_name: 'CivicResolve Admin',
         email: 'admin@civicresolve.ai',
@@ -67,12 +68,28 @@ function getDemoUsers(): DemoUser[] {
         password: 'admin123',
         role: 'admin',
         created_at: new Date().toISOString(),
-      });
+      };
+      users.push(admin);
+      localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    } else {
+      admin.email = 'admin@civicresolve.ai';
+      admin.password = 'admin123';
+      admin.role = 'admin';
       localStorage.setItem(USERS_KEY, JSON.stringify(users));
     }
     return users;
   } catch {
-    return [];
+    return [
+      {
+        id: 1,
+        full_name: 'CivicResolve Admin',
+        email: 'admin@civicresolve.ai',
+        phone: '',
+        password: 'admin123',
+        role: 'admin',
+        created_at: new Date().toISOString(),
+      },
+    ];
   }
 }
 
