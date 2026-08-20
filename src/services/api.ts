@@ -13,9 +13,13 @@
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
-/** True when a backend URL has been configured in the environment. */
+/** True when a backend URL is configured or when deployed in production (e.g. Vercel). */
 export function isBackendAvailable(): boolean {
-  return BASE_URL.length > 0;
+  if (BASE_URL.length > 0) return true;
+  if (import.meta.env.PROD) return true;
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') return true;
+  if (import.meta.env.VITE_USE_BACKEND === 'true') return true;
+  return false;
 }
 
 /** Read the JWT from localStorage. */

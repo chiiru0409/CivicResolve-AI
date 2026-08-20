@@ -1,5 +1,49 @@
 {
+  "framework": "vite",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/auth/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/complaints/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/complaints",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/voice/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/track/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/chat",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/departments/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/departments",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

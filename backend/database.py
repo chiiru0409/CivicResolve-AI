@@ -29,6 +29,14 @@ UPLOADS_DIR            = _PROJECT_ROOT / "uploads"
 UPLOADS_COMPLAINTS_DIR = UPLOADS_DIR / "complaints"
 UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
 
+# In Vercel Serverless environment, local filesystem is read-only except /tmp
+if os.environ.get("VERCEL"):
+    DB_DIR = Path("/tmp/database")
+    DB_PATH = DB_DIR / "civic.db"
+    UPLOADS_DIR = Path("/tmp/uploads")
+    UPLOADS_COMPLAINTS_DIR = UPLOADS_DIR / "complaints"
+    UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
+
 
 # ── DDL statements ─────────────────────────────────────────────────────────────
 
