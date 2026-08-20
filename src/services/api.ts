@@ -1,0 +1,106 @@
+/**
+ * api.ts — Central fetch wrapper for CivicResolve AI backend.
+ *
+ * Rules:
+ * - All API calls go through apiFetch() — never use raw fetch in components.
+ * - Base URL is read from VITE_API_BASE_URL environment variable.
+ * - If VITE_API_BASE_URL is not set, isBackendAvailable() returns false
+ *   and callers fall back to localStorage.
+ * - Every request attaches Authorization: Bearer <token> if a token exists.
+ * - 401 responses clear the token and dispatch a custom 'auth:logout' event
+ *   so AuthContext can react without a direct import cycle.
+ */
+
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+
+/** True when a backend URL has been configured in the environment. */
+export function isBackendAvailable(): boolean {
+  return BASE_URL.length > 0;
+}
+
+/** Read the JWT from localStorage. */
+function getToken(): string | null {
+  return localStorage.getItem('civic_token');
+}
+
+/** Build default headers, attaching the Bearer token when present. */
+function buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...extra,
+  };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly detail?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** Core fetch wrapper. Throws ApiError on non-2xx responses. */
+export async function apiFetch<T = unknown>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  const headers = buildHeaders(options.headers as Record<string, string>);
+
+  // Don't set Content-Type for FormData — browser sets it with boundary
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
+  const res = await fetch(url, { ...options, headers });
+
+  // 401 on protected requests (session expired) — don't trigger for login attempts
+  const isAuthAttempt = path.startsWith('/auth/login') || path.startsWith('/auth/admin/login');
+  if (res.status === 401 && !isAuthAttempt) {
+    localStorage.removeItem('civic_token');
+    window.dispatchEvent(new CustomEvent('auth:logout'));
+    throw new ApiError(401, 'Session expired. Please log in again.');
+  }
+
+  if (!res.ok) {
+    let detail: unknown;
+    try { detail = await res.json(); } catch { detail = await res.text(); }
+    const message =
+      (typeof detail === 'object' && detail !== null && 'detail' in detail)
+        ? String((detail as Record<string, unknown>)['detail'])
+        : `Request failed (${res.status})`;
+    throw new ApiError(res.status, message, detail);
+  }
+
+  // 204 No Content
+  if (res.status === 204) return undefined as T;
+
+  return res.json() as Promise<T>;
+}
+
+/** Convenience wrappers */
+export const api = {
+  get: <T>(path: string) =>
+    apiFetch<T>(path, { method: 'GET' }),
+
+  post: <T>(path: string, body: unknown) =>
+    apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+
+  patch: <T>(path: string, body: unknown) =>
+    apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  put: <T>(path: string, body: unknown) =>
+    apiFetch<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
+
+  delete: <T>(path: string) =>
+    apiFetch<T>(path, { method: 'DELETE' }),
+
+  upload: <T>(path: string, formData: FormData) =>
+    apiFetch<T>(path, { method: 'POST', body: formData }),
+};

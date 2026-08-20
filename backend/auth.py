@@ -1,0 +1,260 @@
+"""
+auth.py — User registration, login, JWT creation and verification.
+
+Rules:
+- Passwords are hashed with bcrypt via passlib — never stored plain.
+- JWTs are signed with HS256 using SECRET_KEY from environment.
+- Citizen tokens expire in 24 hours.
+- Admin tokens expire in 8 hours.
+- Frontend route guards are UX only — every protected endpoint re-validates
+  the token independently. Backend is the authority.
+- Role is embedded in the JWT payload (sub, email, role, full_name, exp, iat).
+"""
+
+from __future__ import annotations
+
+import os
+import logging
+import sqlite3
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
+from database import get_connection
+
+logger = logging.getLogger(__name__)
+
+# ── Config ─────────────────────────────────────────────────────────────────────
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "civicresolve-dev-secret-change-in-production")
+ALGORITHM  = "HS256"
+CITIZEN_TOKEN_EXPIRE_HOURS = 24
+ADMIN_TOKEN_EXPIRE_HOURS   = 8
+
+# ── Password hashing ───────────────────────────────────────────────────────────
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(plain: str) -> str:
+    return _pwd_context.hash(plain)
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return _pwd_context.verify(plain, hashed)
+
+# ── Bearer scheme ──────────────────────────────────────────────────────────────
+_bearer = HTTPBearer(auto_error=False)
+
+# ── Users table DDL ────────────────────────────────────────────────────────────
+# Called from database.init_db() — safe IF NOT EXISTS
+CREATE_USERS_TABLE = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name     TEXT NOT NULL,
+    email         TEXT UNIQUE NOT NULL,
+    phone         TEXT,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'citizen'
+                  CHECK (role IN ('citizen', 'admin')),
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
+CREATE_USERS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+"""
+
+# Add citizen_id FK to complaints (safe migration — only if missing)
+ADD_CITIZEN_ID_COLUMN = """
+ALTER TABLE complaints ADD COLUMN citizen_id INTEGER REFERENCES users(id);
+"""
+ADD_CITIZEN_ID_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_complaints_citizen_id ON complaints(citizen_id);
+"""
+
+
+# ── Database helpers ───────────────────────────────────────────────────────────
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE email = ? AND is_active = 1;", (email,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ? AND is_active = 1;", (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_user(full_name: str, email: str, phone: str, password: str, role: str = "citizen") -> dict:
+    """
+    Insert a new user. Raises HTTPException 409 if email already exists.
+    Returns the created user row as a dict.
+    """
+    conn = get_connection()
+    try:
+        existing = conn.execute("SELECT id FROM users WHERE email = ?;", (email,)).fetchone()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email already exists.",
+            )
+        hashed = hash_password(password)
+        with conn:
+            cur = conn.execute(
+                """
+                INSERT INTO users (full_name, email, phone, password_hash, role)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (full_name, email, phone, hashed, role),
+            )
+            user_id = cur.lastrowid
+        row = conn.execute("SELECT * FROM users WHERE id = ?;", (user_id,)).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def update_user_profile(user_id: int, full_name: Optional[str], phone: Optional[str]) -> dict:
+    conn = get_connection()
+    try:
+        with conn:
+            if full_name is not None:
+                conn.execute(
+                    "UPDATE users SET full_name = ?, updated_at = datetime('now') WHERE id = ?;",
+                    (full_name, user_id),
+                )
+            if phone is not None:
+                conn.execute(
+                    "UPDATE users SET phone = ?, updated_at = datetime('now') WHERE id = ?;",
+                    (phone, user_id),
+                )
+        row = conn.execute("SELECT * FROM users WHERE id = ?;", (user_id,)).fetchone()
+        return dict(row) if row else {}
+    finally:
+        conn.close()
+
+
+# ── JWT creation ───────────────────────────────────────────────────────────────
+
+def create_token(user: dict) -> str:
+    """
+    Create a signed JWT for the given user dict.
+    Payload: { sub, email, role, full_name, exp, iat }
+    """
+    role    = user.get("role", "citizen")
+    hours   = ADMIN_TOKEN_EXPIRE_HOURS if role == "admin" else CITIZEN_TOKEN_EXPIRE_HOURS
+    now     = datetime.now(timezone.utc)
+    expire  = now + timedelta(hours=hours)
+
+    payload = {
+        "sub":       str(user["id"]),
+        "email":     user["email"],
+        "role":      role,
+        "full_name": user.get("full_name", ""),
+        "iat":       int(now.timestamp()),
+        "exp":       int(expire.timestamp()),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+# ── JWT decoding + FastAPI dependency ──────────────────────────────────────────
+
+def _decode_token(token: str) -> dict:
+    """
+    Decode and validate a JWT.
+    Raises HTTPException 401 on any failure (expired, tampered, missing).
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token: missing subject.")
+        return payload
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is invalid or has expired. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+) -> dict:
+    """
+    FastAPI dependency — extracts and validates the Bearer JWT.
+    Returns the decoded payload dict.
+    Raises 401 if token is missing or invalid.
+    """
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please log in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return _decode_token(credentials.credentials)
+
+
+def require_citizen(current_user: dict = Depends(get_current_user)) -> dict:
+    """Dependency that requires role = citizen OR admin (admin can also read citizen data)."""
+    if current_user.get("role") not in ("citizen", "admin"):
+        raise HTTPException(status_code=403, detail="Citizen access required.")
+    return current_user
+
+
+def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """Dependency that requires role = admin."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authority access required. This area is restricted.",
+        )
+    return current_user
+
+
+# ── Seed default admin account ────────────────────────────────────────────────
+# Called from database.init_db() — only creates if no admin exists.
+
+def seed_admin() -> None:
+    """
+    Create a default admin account if none exists.
+    Credentials: admin@civicresolve.ai / admin123
+    CHANGE THIS in production via environment variables.
+    """
+    admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai")
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
+    admin_name     = os.getenv("ADMIN_NAME",     "CivicResolve Admin")
+
+    conn = get_connection()
+    try:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE role = 'admin' LIMIT 1;"
+        ).fetchone()
+        if existing:
+            return  # admin already exists — never overwrite
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO users (full_name, email, phone, password_hash, role)
+                VALUES (?, ?, ?, ?, 'admin');
+                """,
+                (admin_name, admin_email, "", hash_password(admin_password)),
+            )
+        logger.info("Default admin account created: %s", admin_email)
+    finally:
+        conn.close()
