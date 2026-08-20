@@ -222,7 +222,8 @@ def register(body: UserRegister):
 
 @router.post("/auth/login", response_model=TokenResponse)
 def login(body: UserLogin):
-    user = get_user_by_email(body.email)
+    email = body.email.strip().lower()
+    user = get_user_by_email(email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
     if user["role"] == "admin":
@@ -236,7 +237,11 @@ def login(body: UserLogin):
 
 @router.post("/auth/admin/login", response_model=TokenResponse)
 def admin_login(body: AdminLogin):
-    user = get_user_by_email(body.email)
+    email = body.email.strip().lower()
+    user = get_user_by_email(email)
+    if not user:
+        seed_admin()
+        user = get_user_by_email(email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect credentials.")
     if user["role"] != "admin":

@@ -81,8 +81,9 @@ CREATE INDEX IF NOT EXISTS idx_complaints_citizen_id ON complaints(citizen_id);
 def get_user_by_email(email: str) -> Optional[dict]:
     conn = get_connection()
     try:
+        clean = email.strip().lower()
         row = conn.execute(
-            "SELECT * FROM users WHERE email = ? AND is_active = 1;", (email,)
+            "SELECT * FROM users WHERE LOWER(email) = ? AND is_active = 1;", (clean,)
         ).fetchone()
         return dict(row) if row else None
     finally:
@@ -232,21 +233,29 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
 
 def seed_admin() -> None:
     """
-    Create a default admin account if none exists.
+    Create or synchronize the default admin account.
     Credentials: admin@civicresolve.ai / admin123
-    CHANGE THIS in production via environment variables.
     """
-    admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai")
+    admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai").strip().lower()
     admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
     admin_name     = os.getenv("ADMIN_NAME",     "CivicResolve Admin")
 
     conn = get_connection()
     try:
         existing = conn.execute(
-            "SELECT id FROM users WHERE role = 'admin' LIMIT 1;"
+            "SELECT id, password_hash FROM users WHERE LOWER(email) = ?;", (admin_email,)
         ).fetchone()
         if existing:
-            return  # admin already exists — never overwrite
+            # Synchronize admin password if needed
+            if not verify_password(admin_password, existing["password_hash"]):
+                with conn:
+                    conn.execute(
+                        "UPDATE users SET password_hash = ?, role = 'admin', is_active = 1, updated_at = datetime('now') WHERE id = ?;",
+                        (hash_password(admin_password), existing["id"]),
+                    )
+                logger.info("Admin password synchronized for: %s", admin_email)
+            return
+
         with conn:
             conn.execute(
                 """

@@ -115,7 +115,15 @@ export default function AdminLoginPage() {
             {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Authenticating…</> : <>Enter Command Center <ArrowRight className="w-4 h-4" /></>}
           </button>
 
-          <div className="bg-white/5 border border-white/8 rounded-xl px-4 py-3">
+          <div
+            onClick={() => {
+              setEmail('admin@civicresolve.ai');
+              setPassword('admin123');
+              setError('');
+            }}
+            className="bg-white/5 hover:bg-white/8 border border-white/8 rounded-xl px-4 py-3 cursor-pointer transition-colors"
+            title="Click to autofill demo credentials"
+          >
             <p className="text-xs text-white/30 font-semibold mb-1 flex items-center gap-1.5">
               <Zap className="w-3 h-3 text-[#FFC400]" /> Demo credentials
             </p>
