@@ -220,9 +220,10 @@ export async function register(data: {
 // ── Citizen Login ─────────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
+  const cleanEmail = email.trim().toLowerCase();
   if (isBackendAvailable()) {
     try {
-      const res = await api.post<TokenResponse>('/auth/login', { email: email.trim(), password });
+      const res = await api.post<TokenResponse>('/auth/login', { email: cleanEmail, password });
       if (res && res.access_token) {
         storeToken(res.access_token);
         return res;
@@ -238,7 +239,7 @@ export async function login(email: string, password: string): Promise<TokenRespo
 
   // Demo fallback
   const users = getDemoUsers();
-  const user  = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+  const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
   if (!user || user.password !== password) {
     throw new Error('Incorrect email or password.');
   }
@@ -253,9 +254,10 @@ export async function login(email: string, password: string): Promise<TokenRespo
 // ── Admin Login ───────────────────────────────────────────────────────────────
 
 export async function adminLogin(email: string, password: string): Promise<TokenResponse> {
+  const cleanEmail = email.trim().toLowerCase();
   if (isBackendAvailable()) {
     try {
-      const res = await api.post<TokenResponse>('/auth/admin/login', { email: email.trim(), password });
+      const res = await api.post<TokenResponse>('/auth/admin/login', { email: cleanEmail, password });
       if (res && res.access_token) {
         storeToken(res.access_token);
         return res;
@@ -271,7 +273,7 @@ export async function adminLogin(email: string, password: string): Promise<Token
 
   // Demo fallback — only admin@civicresolve.ai / admin123
   const users = getDemoUsers();
-  const user  = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+  const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
   if (!user || user.password !== password) {
     throw new Error('Incorrect credentials.');
   }

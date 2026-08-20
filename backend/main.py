@@ -238,18 +238,52 @@ def login(body: UserLogin):
 @router.post("/auth/admin/login", response_model=TokenResponse)
 def admin_login(body: AdminLogin):
     email = body.email.strip().lower()
+    admin_env_email = os.getenv("ADMIN_EMAIL", "admin@civicresolve.ai").strip().lower()
+    admin_env_pass  = os.getenv("ADMIN_PASSWORD", "admin123")
+
     user = get_user_by_email(email)
+    
+    # If the user is authenticating as the default/configured admin
+    is_default_admin = (email == admin_env_email or email == "admin@civicresolve.ai")
+    
+    if is_default_admin:
+        # Check against configured password OR db password hash
+        if body.password == admin_env_pass or (user and verify_password(body.password, user.get("password_hash", ""))):
+            # Ensure DB has this admin user properly seeded
+            if not user or user.get("role") != "admin":
+                seed_admin()
+                user = get_user_by_email(email)
+            
+            if not user:
+                # If SQLite disk is read-only in serverless, provide in-memory identity
+                user = {
+                    "id": 1,
+                    "full_name": os.getenv("ADMIN_NAME", "CivicResolve Admin"),
+                    "email": email,
+                    "role": "admin",
+                }
+            token = create_token(user)
+            return TokenResponse(
+                access_token=token, role="admin",
+                user_id=user["id"], full_name=user.get("full_name", "CivicResolve Admin"), email=email,
+            )
+        else:
+            raise HTTPException(status_code=401, detail="Incorrect credentials.")
+
+    # General database admin validation
     if not user:
         seed_admin()
         user = get_user_by_email(email)
-    if not user or not verify_password(body.password, user["password_hash"]):
+
+    if not user or not verify_password(body.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Incorrect credentials.")
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Not an authority account.")
+
     token = create_token(user)
     return TokenResponse(
         access_token=token, role=user["role"],
-        user_id=user["id"], full_name=user["full_name"], email=user["email"],
+        user_id=user["id"], full_name=user.get("full_name", "CivicResolve Admin"), email=user["email"],
     )
 
 
