@@ -237,6 +237,7 @@ def init_db() -> None:
 
         # 4. Seed departments (outside the DDL transaction so it can be skipped)
         _seed_departments(conn)
+        _seed_initial_complaints(conn)
 
         logger.info("Database initialised: %s", DB_PATH)
     finally:
@@ -330,3 +331,159 @@ def _seed_departments(conn: sqlite3.Connection) -> None:
             _DEPT_SEED,
         )
     logger.info("Departments seeded (%d rows)", len(_DEPT_SEED))
+
+
+_INITIAL_COMPLAINTS_SEED = [
+    {
+        "id": "CR-2026-123994",
+        "complaint_number": "CR-2026-123994",
+        "title": "Severe pothole causing traffic block",
+        "description": "Large deep pothole on MG Road near the metro pillar 45. Vehicles are swerving into oncoming traffic.",
+        "category": "Roads",
+        "department": "Municipal Roads & Infrastructure Department",
+        "priority": "HIGH",
+        "severity": 8,
+        "status": "In Progress",
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "location": "MG Road, Metro Pillar 45",
+        "landmark": "Near Metro Pillar 45",
+        "ai_confidence": 92,
+        "ai_reason": "High traffic corridor with safety hazard.",
+        "assigned_officer": "Central Roads Team",
+        "assigned_team": "Central Roads Team",
+        "estimated_response": "24 hours",
+        "zone": "Zone 1",
+        "citizen_id": 2,
+        "is_anonymous": 0,
+        "contact_preference": "email",
+        "source": "Web",
+        "created_at": "2026-08-20T10:00:00",
+        "updated_at": "2026-08-20T11:30:00",
+    },
+    {
+        "id": "CR-2026-004821",
+        "complaint_number": "CR-2026-004821",
+        "title": "Large pothole near college bus stop",
+        "description": "There is a huge pothole near the college bus stop and vehicles are struggling to pass. Two-wheelers have already fallen.",
+        "category": "Roads",
+        "department": "Municipal Roads & Infrastructure Department",
+        "priority": "HIGH",
+        "severity": 7,
+        "status": "Assigned",
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "location": "Main Road, Near College Bus Stop",
+        "landmark": "Government Engineering College",
+        "ai_confidence": 94,
+        "ai_reason": "Large road damage combined with its location near a high-traffic area creates a potential safety risk.",
+        "assigned_officer": "Central Roads Team",
+        "assigned_team": "Central Roads Team",
+        "estimated_response": "24-48 hours",
+        "zone": "Zone 2",
+        "citizen_id": 2,
+        "is_anonymous": 0,
+        "contact_preference": "email",
+        "source": "Web",
+        "created_at": "2026-08-20T12:00:00",
+        "updated_at": "2026-08-20T12:30:00",
+    },
+    {
+        "id": "CR-2026-004820",
+        "complaint_number": "CR-2026-004820",
+        "title": "Garbage overflow at market area",
+        "description": "Garbage has been accumulating for three days near the market. The bins are overflowing and the stench is unbearable.",
+        "category": "Garbage",
+        "department": "Sanitation & Waste Management Department",
+        "priority": "MEDIUM",
+        "severity": 6,
+        "status": "Submitted",
+        "latitude": 12.9352,
+        "longitude": 77.6245,
+        "location": "4th Block Market, 80ft Road",
+        "landmark": "Opposite City Bakery",
+        "ai_confidence": 91,
+        "ai_reason": "Accumulated municipal solid waste in a commercial market zone.",
+        "assigned_officer": "Zone 2 Sanitation Team",
+        "assigned_team": "Zone 2 Sanitation Team",
+        "estimated_response": "12-24 hours",
+        "zone": "Zone 3",
+        "citizen_id": 3,
+        "is_anonymous": 0,
+        "contact_preference": "email",
+        "source": "AI Call",
+        "created_at": "2026-08-20T14:00:00",
+        "updated_at": "2026-08-20T14:00:00",
+    },
+    {
+        "id": "CR-2026-004819",
+        "complaint_number": "CR-2026-004819",
+        "title": "Open drain overflow onto pedestrian walkway",
+        "description": "Stormwater drain is overflowing with black water onto the footpath. Pedestrians cannot walk.",
+        "category": "Drainage",
+        "department": "Drainage & Stormwater Management",
+        "priority": "HIGH",
+        "severity": 8,
+        "status": "In Progress",
+        "latitude": 12.9784,
+        "longitude": 77.6408,
+        "location": "100ft Road, Near Signal Junction",
+        "landmark": "Near Metro Station Exit B",
+        "ai_confidence": 96,
+        "ai_reason": "Contaminated overflow blocking public pedestrian access.",
+        "assigned_officer": "Emergency Pump Team",
+        "assigned_team": "Emergency Pump Team",
+        "estimated_response": "4-8 hours",
+        "zone": "Zone 1",
+        "citizen_id": 2,
+        "is_anonymous": 0,
+        "contact_preference": "email",
+        "source": "Web",
+        "created_at": "2026-08-19T09:00:00",
+        "updated_at": "2026-08-19T11:00:00",
+    }
+]
+
+
+def _seed_initial_complaints(conn: sqlite3.Connection) -> None:
+    cur = conn.execute("SELECT COUNT(*) as cnt FROM complaints;")
+    if cur.fetchone()["cnt"] > 0:
+        return
+    with conn:
+        for c in _INITIAL_COMPLAINTS_SEED:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO complaints (
+                    id, complaint_number, title, description, category, department,
+                    priority, severity, status, latitude, longitude, location, landmark,
+                    ai_confidence, ai_reason, assigned_officer, assigned_team,
+                    estimated_response, zone, citizen_id, is_anonymous, contact_preference,
+                    source, created_at, updated_at
+                ) VALUES (
+                    :id, :complaint_number, :title, :description, :category, :department,
+                    :priority, :severity, :status, :latitude, :longitude, :location, :landmark,
+                    :ai_confidence, :ai_reason, :assigned_officer, :assigned_team,
+                    :estimated_response, :zone, :citizen_id, :is_anonymous, :contact_preference,
+                    :source, :created_at, :updated_at
+                );
+                """,
+                c,
+            )
+            # Insert initial updates
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO complaint_updates (complaint_id, status, message, updated_by, created_at)
+                VALUES (?, 'Submitted', 'Complaint registered in CivicResolve system.', 'system', ?);
+                """,
+                (c["id"], c["created_at"]),
+            )
+            if c["status"] in ("Assigned", "In Progress", "Resolved"):
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO complaint_updates (complaint_id, status, message, updated_by, created_at)
+                    VALUES (?, ?, ?, 'admin', ?);
+                    """,
+                    (c["id"], c["status"], f"Complaint status updated to {c['status']}", c["updated_at"]),
+                )
+    logger.info("Initial complaints seeded (%d rows)", len(_INITIAL_COMPLAINTS_SEED))
+

@@ -261,8 +261,9 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
 
 def seed_admin() -> None:
     """
-    Create or synchronize the default admin account.
-    Credentials: admin@civicresolve.ai / admin123
+    Create or synchronize the default admin and demo citizen accounts.
+    Admin: admin@civicresolve.ai / admin123
+    Citizen: citizen@civicresolve.ai / citizen123
     """
     admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai").strip().lower()
     admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
@@ -270,11 +271,11 @@ def seed_admin() -> None:
 
     conn = get_connection()
     try:
+        # 1. Admin
         existing = conn.execute(
             "SELECT id, password_hash FROM users WHERE LOWER(email) = ?;", (admin_email,)
         ).fetchone()
         if existing:
-            # Synchronize admin password if needed
             if not verify_password(admin_password, existing["password_hash"]):
                 with conn:
                     conn.execute(
@@ -282,16 +283,34 @@ def seed_admin() -> None:
                         (hash_password(admin_password), existing["id"]),
                     )
                 logger.info("Admin password synchronized for: %s", admin_email)
-            return
+        else:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO users (full_name, email, phone, password_hash, role)
+                    VALUES (?, ?, ?, ?, 'admin');
+                    """,
+                    (admin_name, admin_email, "", hash_password(admin_password)),
+                )
+            logger.info("Default admin account created: %s", admin_email)
 
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO users (full_name, email, phone, password_hash, role)
-                VALUES (?, ?, ?, ?, 'admin');
-                """,
-                (admin_name, admin_email, "", hash_password(admin_password)),
-            )
-        logger.info("Default admin account created: %s", admin_email)
+        # 2. Demo Citizens
+        demo_citizens = [
+            ("Citizen User", "citizen@civicresolve.ai", "9876543210", "citizen123"),
+            ("Jeevan", "jeevan8116@gmail.com", "9876543211", "password123"),
+        ]
+        for name, email, phone, pwd in demo_citizens:
+            clean_email = email.strip().lower()
+            u_row = conn.execute("SELECT id FROM users WHERE LOWER(email) = ?;", (clean_email,)).fetchone()
+            if not u_row:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO users (full_name, email, phone, password_hash, role)
+                        VALUES (?, ?, ?, ?, 'citizen');
+                        """,
+                        (name, clean_email, phone, hash_password(pwd)),
+                    )
+                logger.info("Demo citizen account created: %s", clean_email)
     finally:
         conn.close()

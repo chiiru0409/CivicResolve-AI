@@ -45,12 +45,18 @@ export class ApiError extends Error {
   }
 }
 
+function normalizePath(path: string): string {
+  if (path.startsWith('/api/') || path === '/api') return path;
+  return `/api${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 /** Core fetch wrapper. Throws ApiError on non-2xx responses. */
 export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const url = `${BASE_URL}${path}`;
+  const normalizedPath = normalizePath(path);
+  const url = `${BASE_URL}${normalizedPath}`;
   const headers = buildHeaders(options.headers as Record<string, string>);
 
   // Don't set Content-Type for FormData — browser sets it with boundary
@@ -61,7 +67,7 @@ export async function apiFetch<T = unknown>(
   const res = await fetch(url, { ...options, headers });
 
   // 401 on protected requests (session expired) — don't trigger for login attempts
-  const isAuthAttempt = path.startsWith('/auth/login') || path.startsWith('/auth/admin/login');
+  const isAuthAttempt = normalizedPath.includes('/auth/login') || normalizedPath.includes('/auth/admin/login');
   if (res.status === 401 && !isAuthAttempt) {
     localStorage.removeItem('civic_token');
     window.dispatchEvent(new CustomEvent('auth:logout'));
