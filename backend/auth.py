@@ -262,9 +262,11 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
 
 def seed_admin() -> None:
     """
-    Create or synchronize the default admin and demo citizen accounts.
-    Admin: admin@civicresolve.ai / admin123
-    Citizen: citizen@civicresolve.ai / citizen123
+    Create or synchronize the admin account using Vercel environment variables.
+    Source of truth:
+      - ADMIN_EMAIL (from Vercel Environment Variables, fallback: 'admin@civicresolve.ai')
+      - ADMIN_PASSWORD (from Vercel Environment Variables, fallback: 'admin123')
+      - ADMIN_NAME (from Vercel Environment Variables, fallback: 'CivicResolve Admin')
     """
     admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai").strip().lower()
     admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
@@ -272,18 +274,20 @@ def seed_admin() -> None:
 
     conn = get_connection()
     try:
-        # 1. Admin
+        # 1. Admin account synchronization from environment
         existing = conn.execute(
-            "SELECT id, password_hash FROM users WHERE LOWER(email) = ?;", (admin_email,)
+            "SELECT id, password_hash, role FROM users WHERE LOWER(email) = ?;", (admin_email,)
         ).fetchone()
+
         if existing:
-            if not verify_password(admin_password, existing["password_hash"]):
+            # Synchronize password hash and role if environment variable changed
+            if not verify_password(admin_password, existing["password_hash"]) or existing["role"] != "admin":
                 with conn:
                     conn.execute(
-                        "UPDATE users SET password_hash = ?, role = 'admin', is_active = 1, updated_at = datetime('now') WHERE id = ?;",
+                        "UPDATE users SET password_hash = ?, role = 'admin', is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
                         (hash_password(admin_password), existing["id"]),
                     )
-                logger.info("Admin password synchronized for: %s", admin_email)
+                logger.info("Admin account credentials synchronized for: %s", admin_email)
         else:
             with conn:
                 conn.execute(
@@ -293,12 +297,11 @@ def seed_admin() -> None:
                     """,
                     (admin_name, admin_email, "", hash_password(admin_password)),
                 )
-            logger.info("Default admin account created: %s", admin_email)
+            logger.info("Admin account created from environment configuration: %s", admin_email)
 
-        # 2. Demo Citizens
+        # 2. Local demo citizen fallback (only if table is completely fresh)
         demo_citizens = [
             ("Citizen User", "citizen@civicresolve.ai", "9876543210", "citizen123"),
-            ("Jeevan", "jeevan8116@gmail.com", "9876543211", "password123"),
         ]
         for name, email, phone, pwd in demo_citizens:
             clean_email = email.strip().lower()
@@ -312,6 +315,6 @@ def seed_admin() -> None:
                         """,
                         (name, clean_email, phone, hash_password(pwd)),
                     )
-                logger.info("Demo citizen account created: %s", clean_email)
     finally:
         conn.close()
+
