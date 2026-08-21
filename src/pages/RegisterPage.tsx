@@ -70,8 +70,13 @@ export default function RegisterPage() {
 
           <form onSubmit={handleSubmit} className="card space-y-4" noValidate>
             {serverError && (
-              <div className="p-3 bg-[#E10600]/10 border border-[#E10600]/30 rounded-xl text-sm text-[#E10600]">
-                {serverError}
+              <div className="p-3.5 bg-[#E10600]/10 border border-[#E10600]/30 rounded-xl text-sm text-[#E10600] flex flex-col gap-1.5">
+                <span>{serverError}</span>
+                {serverError.toLowerCase().includes('already exists') && (
+                  <Link to="/login" className="text-white font-bold underline hover:text-white/80 transition-colors">
+                    Account already exists? Click here to Sign In →
+                  </Link>
+                )}
               </div>
             )}
             {/* Full name */}

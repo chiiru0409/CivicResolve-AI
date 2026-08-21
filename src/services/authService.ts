@@ -137,7 +137,10 @@ export function decodeToken(token: string): TokenPayload | null {
     if (!b64) return null;
     const json    = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
     const payload = JSON.parse(json) as TokenPayload;
-    if (payload.exp && payload.exp * 1000 < Date.now()) return null;
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      clearToken();
+      return null;
+    }
     return payload;
   } catch {
     return null;
@@ -160,6 +163,7 @@ export function storeToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem('civicresolve_complaints');
 }
 
 export function isAuthenticated(): boolean {
@@ -175,108 +179,45 @@ export function isAdminUser(): boolean {
 export async function register(data: {
   full_name: string;
   email: string;
-  phone: string;
+  phone?: string;
   password: string;
 }): Promise<TokenResponse> {
-  // Try backend first
-  if (isBackendAvailable()) {
-    try {
-      const res = await api.post<TokenResponse>('/auth/register', data);
-      if (res && res.access_token) {
-        storeToken(res.access_token);
-        return res;
-      }
-      throw new Error('Invalid registration response from server.');
-    } catch (err) {
-      // If backend is unreachable (network error), fall through to demo mode
-      const msg = err instanceof Error ? err.message : '';
-      if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
-        throw err; // Real error (e.g. 409 duplicate email) — re-throw
-      }
-    }
+  const cleanEmail = data.email.trim().toLowerCase();
+  const res = await api.post<TokenResponse>('/auth/register', {
+    full_name: data.full_name.trim(),
+    email: cleanEmail,
+    phone: data.phone?.trim() ?? '',
+    password: data.password,
+  });
+  if (res && res.access_token) {
+    storeToken(res.access_token);
+    return res;
   }
-
-  // Demo fallback
-  const users = getDemoUsers();
-  if (users.find((u) => u.email.toLowerCase() === data.email.toLowerCase())) {
-    throw new Error('An account with this email already exists.');
-  }
-  const newUser: DemoUser = {
-    id:         Date.now(),
-    full_name:  data.full_name,
-    email:      data.email,
-    phone:      data.phone ?? '',
-    password:   data.password,
-    role:       'citizen',
-    created_at: new Date().toISOString(),
-  };
-  users.push(newUser);
-  saveDemoUsers(users);
-  const token = buildDemoToken(newUser);
-  storeToken(token);
-  return buildTokenResponse(newUser, token);
+  throw new Error('Invalid registration response from server.');
 }
 
 // ── Citizen Login ─────────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
   const cleanEmail = email.trim().toLowerCase();
-  try {
-    const res = await api.post<TokenResponse>('/auth/login', { email: cleanEmail, password });
-    if (res && res.access_token) {
-      storeToken(res.access_token);
-      return res;
-    }
-    throw new Error('Invalid authentication response from server.');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : '';
-    if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
-      throw err;
-    }
-    // Offline fallback only when backend is unreachable
-    const users = getDemoUsers();
-    const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (!user || user.password !== password) {
-      throw new Error('Incorrect email or password.');
-    }
-    if (user.role === 'admin') {
-      throw new Error('Please use the Authority login page for admin access.');
-    }
-    const token = buildDemoToken(user);
-    storeToken(token);
-    return buildTokenResponse(user, token);
+  const res = await api.post<TokenResponse>('/auth/login', { email: cleanEmail, password });
+  if (res && res.access_token) {
+    storeToken(res.access_token);
+    return res;
   }
+  throw new Error('Invalid authentication response from server.');
 }
 
-// ── Admin Login (Backend is Single Source of Truth) ───────────────────────────
+// ── Admin Login ───────────────────────────────────────────────────────────────
 
 export async function adminLogin(email: string, password: string): Promise<TokenResponse> {
   const cleanEmail = email.trim().toLowerCase();
-  try {
-    const res = await api.post<TokenResponse>('/auth/admin/login', { email: cleanEmail, password });
-    if (res && res.access_token) {
-      storeToken(res.access_token);
-      return res;
-    }
-    throw new Error('Invalid authentication response from server.');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : '';
-    if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed to fetch')) {
-      throw err;
-    }
-    // Offline fallback only when server is completely down / network error
-    const users = getDemoUsers();
-    const user  = users.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (!user || user.password !== password) {
-      throw new Error('Incorrect credentials.');
-    }
-    if (user.role !== 'admin') {
-      throw new Error('Not an authority account.');
-    }
-    const token = buildDemoToken(user);
-    storeToken(token);
-    return buildTokenResponse(user, token);
+  const res = await api.post<TokenResponse>('/auth/admin/login', { email: cleanEmail, password });
+  if (res && res.access_token) {
+    storeToken(res.access_token);
+    return res;
   }
+  throw new Error('Invalid authentication response from server.');
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────
@@ -288,30 +229,7 @@ export function logout(): void {
 // ── Get profile ───────────────────────────────────────────────────────────────
 
 export async function getMe(): Promise<UserOut> {
-  if (isBackendAvailable()) {
-    try {
-      return await api.get<UserOut>('/auth/me');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed')) {
-        throw err;
-      }
-    }
-  }
-
-  // Demo fallback — read from token
-  const payload = getStoredUser();
-  if (!payload) throw new Error('Not authenticated.');
-  const users = getDemoUsers();
-  const user  = users.find((u) => String(u.id) === payload.sub);
-  return {
-    id:         user?.id ?? Number(payload.sub),
-    full_name:  user?.full_name ?? payload.full_name,
-    email:      user?.email     ?? payload.email,
-    phone:      user?.phone     ?? null,
-    role:       user?.role      ?? payload.role,
-    created_at: user?.created_at ?? new Date().toISOString(),
-  };
+  return await api.get<UserOut>('/auth/me');
 }
 
 // ── Update profile ────────────────────────────────────────────────────────────
@@ -320,34 +238,6 @@ export async function updateProfile(data: {
   full_name?: string;
   phone?: string;
 }): Promise<UserOut> {
-  if (isBackendAvailable()) {
-    try {
-      return await api.put<UserOut>('/auth/profile', data);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (!msg.includes('fetch') && !msg.includes('network') && !msg.includes('Failed')) {
-        throw err;
-      }
-    }
-  }
-
-  // Demo fallback
-  const payload = getStoredUser();
-  if (!payload) throw new Error('Not authenticated.');
-  const users = getDemoUsers();
-  const idx   = users.findIndex((u) => String(u.id) === payload.sub);
-  if (idx >= 0) {
-    if (data.full_name) users[idx].full_name = data.full_name;
-    if (data.phone !== undefined) users[idx].phone = data.phone;
-    saveDemoUsers(users);
-    return {
-      id:         users[idx].id,
-      full_name:  users[idx].full_name,
-      email:      users[idx].email,
-      phone:      users[idx].phone || null,
-      role:       users[idx].role,
-      created_at: users[idx].created_at,
-    };
-  }
-  throw new Error('User not found.');
+  return await api.put<UserOut>('/auth/profile', data);
 }
+

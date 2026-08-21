@@ -103,87 +103,49 @@ function mapApiComplaint(raw: Record<string, any>): Complaint {
 
 // ── Unified public API ────────────────────────────────────────────────────────
 
-/** Submit a new complaint. Returns the created Complaint. */
+/** Submit a new complaint. Returns the created Complaint from backend. */
 export async function submitComplaint(
   data: Record<string, unknown>,
 ): Promise<Complaint> {
-  if (isBackendAvailable()) {
-    const raw = await api.post<Record<string, unknown>>('/complaints', { ...data, source: 'Web' });
-    const complaint = mapApiComplaint(raw as Record<string, unknown>);
-    // Also persist to localStorage so SuccessPage / fallback reads work
-    const stored = readStorage();
-    stored.unshift(complaint);
-    writeStorage(stored);
-    return complaint;
-  }
-  // Offline fallback — return mock
-  const { generateComplaintId } = await import('../utils/helpers');
-  const id = generateComplaintId();
-  const now = new Date().toISOString();
-  const fallback: Complaint = {
-    id,
-    title: (data.title as string) ?? 'Civic Issue',
-    description: (data.description as string) ?? '',
-    category: (data.category as Complaint['category']) ?? 'Other',
-    priority: (data.priority as Complaint['priority']) ?? 'LOW',
-    status: 'Submitted',
-    department: (data.department as string) ?? '',
-    location: (data.location as string) ?? '',
-    submittedAt: now,
-    updatedAt: now,
-    source: (data.source as string) ?? 'Web',
-    timeline: [
-      { id: 't1', label: 'Submitted',    timestamp: now,  status: 'completed' },
-      { id: 't2', label: 'AI Analysis',  timestamp: now,  status: 'completed' },
-      { id: 't3', label: 'Assigned',     timestamp: null, status: 'current'   },
-      { id: 't4', label: 'In Progress',  timestamp: null, status: 'pending'   },
-      { id: 't5', label: 'Resolved',     timestamp: null, status: 'pending'   },
-    ],
-    aiConfidence: (data.ai_confidence as number) ?? undefined,
-    aiReason:     (data.ai_reason as string)     ?? undefined,
-  };
-  const stored = readStorage();
-  stored.unshift(fallback);
-  writeStorage(stored);
-  return fallback;
+  const raw = await api.post<Record<string, unknown>>('/complaints', { ...data, source: 'Web' });
+  return mapApiComplaint(raw as Record<string, unknown>);
 }
 
-/** Get all complaints for the logged-in citizen. */
+/** Get all complaints for the logged-in citizen strictly from backend. */
 export async function getMineComplaints(): Promise<Complaint[]> {
-  if (isBackendAvailable()) {
+  try {
     const raw = await api.get<Record<string, unknown>[]>('/complaints/mine');
-    return raw.map(mapApiComplaint);
+    return (raw || []).map(mapApiComplaint);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      return [];
+    }
+    throw err;
   }
-  return readStorage().slice(0, 10);
 }
 
 /** Get a single complaint by ID (authenticated citizen). */
 export async function getComplaintById(id: string): Promise<Complaint | undefined> {
-  if (isBackendAvailable()) {
-    try {
-      const raw = await api.get<Record<string, unknown>>(`/complaints/${id}`);
-      return mapApiComplaint(raw);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return undefined;
-      throw err;
-    }
+  try {
+    const raw = await api.get<Record<string, unknown>>(`/complaints/${id}`);
+    return mapApiComplaint(raw);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
   }
-  return readStorage().find((c) => c.id === id);
 }
 
 /** Public complaint tracking — no auth needed. */
 export async function trackComplaint(complaintNumber: string): Promise<Complaint | undefined> {
-  if (isBackendAvailable()) {
-    try {
-      const raw = await api.get<Record<string, unknown>>(`/track/${complaintNumber}`);
-      return mapApiComplaint(raw);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return undefined;
-      throw err;
-    }
+  try {
+    const raw = await api.get<Record<string, unknown>>(`/track/${complaintNumber}`);
+    return mapApiComplaint(raw);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
   }
-  return readStorage().find((c) => c.id === complaintNumber);
 }
+
 
 // ── localStorage-only helpers (used by admin in offline/demo mode) ────────────
 

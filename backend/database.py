@@ -169,15 +169,106 @@ _MIGRATION_COLUMNS = [
 ]
 
 
+class PostgresCursorWrapper:
+    def __init__(self, cur):
+        self._cur = cur
+        self.lastrowid = None
+
+    def execute(self, sql: str, params: Any = None):
+        import re
+        pg_sql = sql.replace("?", "%s")
+        pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
+        # Capture inserted user id
+        is_insert_users = re.search(r"INSERT\s+INTO\s+users\b", pg_sql, re.IGNORECASE)
+        if is_insert_users and "RETURNING" not in pg_sql.upper():
+            pg_sql = pg_sql.rstrip().rstrip(";") + " RETURNING id;"
+            self._cur.execute(pg_sql, params or ())
+            res = self._cur.fetchone()
+            if res and "id" in res:
+                self.lastrowid = res["id"]
+            return self
+
+        self._cur.execute(pg_sql, params or ())
+        return self
+
+    def executemany(self, sql: str, params_seq: Any):
+        import re
+        pg_sql = sql.replace("?", "%s")
+        pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
+        self._cur.executemany(pg_sql, params_seq)
+        return self
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        return dict(row) if row is not None else None
+
+    def fetchall(self):
+        rows = self._cur.fetchall()
+        return [dict(r) for r in rows]
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    def close(self):
+        self._cur.close()
+
+
+class PostgresConnectionWrapper:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql: str, params: Any = None):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def executemany(self, sql: str, params_seq: Any):
+        cur = self.cursor()
+        cur.executemany(sql, params_seq)
+        return cur
+
+    def cursor(self):
+        from psycopg2.extras import RealDictCursor
+        cur = self._conn.cursor(cursor_factory=RealDictCursor)
+        return PostgresCursorWrapper(cur)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+
+
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
-def get_connection() -> sqlite3.Connection:
+def get_connection():
     """
-    Return a new SQLite connection with:
-    - Row-factory set to sqlite3.Row (column-name access)
-    - WAL journal mode (better concurrent read/write)
-    - Foreign keys enforced
+    Return an active database connection.
+    If DATABASE_URL or POSTGRES_URL is set, connects to PostgreSQL.
+    Otherwise connects to SQLite.
     """
+    db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("POSTGRESQL_URL")
+    if db_url and db_url.startswith(("postgres://", "postgresql://")):
+        try:
+            import psycopg2
+            conn = psycopg2.connect(db_url)
+            return PostgresConnectionWrapper(conn)
+        except Exception as exc:
+            logger.error("PostgreSQL connection error, falling back to SQLite: %s", exc)
+
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -185,17 +276,24 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
-def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+def _column_exists(conn, table: str, column: str) -> bool:
     """Return True if *column* already exists in *table*."""
-    cur = conn.execute(f"PRAGMA table_info({table});")
-    return any(row["name"] == column for row in cur.fetchall())
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table});")
+        return any(row["name"] == column for row in cur.fetchall())
+    except Exception:
+        return False
 
 
-def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
-    cur = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table,)
-    )
-    return cur.fetchone() is not None
+def _table_exists(conn, table: str) -> bool:
+    try:
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table,)
+        )
+        return cur.fetchone() is not None
+    except Exception:
+        return True
+
 
 
 def init_db() -> None:

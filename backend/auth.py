@@ -134,13 +134,14 @@ def create_user(full_name: str, email: str, phone: str, password: str, role: str
     Insert a new user. Raises HTTPException 409 if email already exists.
     Returns the created user row as a dict.
     """
+    clean_email = email.strip().lower()
     conn = get_connection()
     try:
-        existing = conn.execute("SELECT id FROM users WHERE email = ?;", (email,)).fetchone()
+        existing = conn.execute("SELECT id FROM users WHERE LOWER(email) = ?;", (clean_email,)).fetchone()
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="An account with this email already exists.",
+                detail="An account with this email already exists. Please log in.",
             )
         hashed = hash_password(password)
         with conn:
@@ -149,7 +150,7 @@ def create_user(full_name: str, email: str, phone: str, password: str, role: str
                 INSERT INTO users (full_name, email, phone, password_hash, role)
                 VALUES (?, ?, ?, ?, ?);
                 """,
-                (full_name, email, phone, hashed, role),
+                (full_name.strip(), clean_email, phone.strip() if phone else "", hashed, role),
             )
             user_id = cur.lastrowid
         row = conn.execute("SELECT * FROM users WHERE id = ?;", (user_id,)).fetchone()
