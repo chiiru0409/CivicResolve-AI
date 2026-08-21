@@ -84,12 +84,18 @@ export async function apiFetch<T = unknown>(
   }
 
   if (!res.ok) {
-    let detail: unknown;
-    try { detail = await res.json(); } catch { detail = await res.text(); }
+    let detail: unknown = null;
+    let rawText = '';
+    try {
+      rawText = await res.text();
+      detail = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      detail = rawText || null;
+    }
     let message =
       (typeof detail === 'object' && detail !== null && 'detail' in detail)
         ? String((detail as Record<string, unknown>)['detail'])
-        : '';
+        : (typeof detail === 'string' && detail ? detail : '');
     if (!message) {
       message =
         res.status === 401 ? 'Incorrect email or password.' :
