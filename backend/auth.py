@@ -143,9 +143,14 @@ def get_user_by_email(email: str) -> Optional[dict]:
     try:
         clean = email.strip().lower()
         row = conn.execute(
-            "SELECT * FROM users WHERE LOWER(email) = ? AND is_active = 1;", (clean,)
+            "SELECT * FROM users WHERE LOWER(email) = ?;", (clean,)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        if d.get("is_active") in (0, False, "0", "false"):
+            return None
+        return d
     finally:
         conn.close()
 
@@ -154,9 +159,14 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT * FROM users WHERE id = ? AND is_active = 1;", (user_id,)
+            "SELECT * FROM users WHERE id = ?;", (user_id,)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        if d.get("is_active") in (0, False, "0", "false"):
+            return None
+        return d
     finally:
         conn.close()
 

@@ -83,7 +83,7 @@ export async function apiFetch<T = unknown>(
 
   let res: Response;
   try {
-    res = await fetch(url, { ...options, headers });
+    res = await fetch(url, { cache: 'no-store', ...options, headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {

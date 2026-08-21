@@ -227,7 +227,10 @@ def register(body: UserRegister):
 def login(body: UserLogin):
     email = body.email.strip().lower()
     user = get_user_by_email(email)
-    if not user or not verify_password(body.password, user["password_hash"]):
+    pw_ok = False
+    if user and user.get("password_hash"):
+        pw_ok = verify_password(body.password, user["password_hash"]) or verify_password(body.password.strip(), user["password_hash"])
+    if not user or not pw_ok:
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
     if user["role"] == "admin":
         raise HTTPException(status_code=403, detail="Please use /auth/admin/login for authority access.")

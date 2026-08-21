@@ -171,6 +171,26 @@ _MIGRATION_COLUMNS = [
 ]
 
 
+class RowWrapper(dict):
+    """
+    Dictionary wrapper that allows both column-name and integer index access,
+    mirroring sqlite3.Row behavior.
+    """
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            vals = list(self.values())
+            if 0 <= key < len(vals):
+                return vals[key]
+            raise IndexError(f"Tuple index {key} out of range ({len(vals)} items)")
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        if isinstance(key, int):
+            vals = list(self.values())
+            return vals[key] if 0 <= key < len(vals) else default
+        return super().get(key, default)
+
+
 class PostgresCursorWrapper:
     def __init__(self, cur):
         self._cur = cur
@@ -202,11 +222,11 @@ class PostgresCursorWrapper:
 
     def fetchone(self):
         row = self._cur.fetchone()
-        return dict(row) if row is not None else None
+        return RowWrapper(row) if row is not None else None
 
     def fetchall(self):
         rows = self._cur.fetchall()
-        return [dict(r) for r in rows]
+        return [RowWrapper(r) for r in rows]
 
     @property
     def rowcount(self):
