@@ -240,66 +240,72 @@ def login(body: UserLogin):
 
 @router.post("/auth/admin/login", response_model=TokenResponse)
 def admin_login(body: AdminLogin):
-    email = body.email.strip().strip("'").strip('"').lower()
-    clean_password = body.password.strip()
-    admin_env_email = os.getenv("ADMIN_EMAIL", "admin@civicresolve.ai").strip().strip("'").strip('"').lower()
-    admin_env_pass  = os.getenv("ADMIN_PASSWORD", "admin123").strip().strip("'").strip('"')
+    clean_email = body.email.strip().strip("'").strip('"').lower()
+    clean_password = body.password.strip().strip("'").strip('"')
+    raw_password = body.password
 
-    user = get_user_by_email(email)
-    logger.info("[AUTH] Admin login attempt for: %s (env_admin: %s)", email, admin_env_email)
-    
-    # If the user is authenticating as the configured admin email
-    is_default_admin = (email == admin_env_email or email == "admin@civicresolve.ai")
-    
-    if is_default_admin:
-        # Check against configured env password OR db password hash
-        pw_ok = (
-            (body.password == admin_env_pass)
-            or (clean_password == admin_env_pass)
-            or (user and verify_password(body.password, user.get("password_hash", "")))
-            or (user and verify_password(clean_password, user.get("password_hash", "")))
+    admin_env_email, admin_env_pass, admin_env_name = get_admin_credentials()
+    user = get_user_by_email(clean_email)
+
+    # Check if credentials match environment variable configuration
+    matches_env_email = (clean_email == admin_env_email or clean_email == "admin@civicresolve.ai")
+    matches_env_pass = (
+        clean_password == admin_env_pass
+        or raw_password == admin_env_pass
+        or clean_password == admin_env_pass.strip()
+    )
+
+    # Check if credentials match database record
+    matches_db = False
+    if user and user.get("role") == "admin":
+        user_hash = user.get("password_hash", "")
+        matches_db = (
+            verify_password(raw_password, user_hash)
+            or verify_password(clean_password, user_hash)
+            or raw_password == user_hash
+            or clean_password == user_hash
         )
-        logger.info("[AUTH] Admin verification for %s: success=%s", email, bool(pw_ok))
-        if pw_ok:
-            # Ensure DB has this admin user properly seeded/synchronized
-            if not user or user.get("role") != "admin" or not verify_password(clean_password, user.get("password_hash", "")):
-                seed_admin()
-                user = get_user_by_email(email)
-            
-            if not user:
-                user = {
-                    "id": 1,
-                    "full_name": os.getenv("ADMIN_NAME", "CivicResolve Admin"),
-                    "email": email,
-                    "role": "admin",
-                }
-            token = create_token(user)
-            logger.info("[AUTH] Admin login successful for %s, token generated.", email)
-            return TokenResponse(
-                access_token=token, role="admin",
-                user_id=user["id"], full_name=user.get("full_name", "CivicResolve Admin"), email=email,
-            )
-        else:
-            logger.warning("[AUTH] Admin login failed: invalid password for %s", email)
-            raise HTTPException(status_code=401, detail="Incorrect credentials.")
 
-    # General database admin validation
-    if not user:
-        seed_admin()
-        user = get_user_by_email(email)
+    pw_ok = (matches_env_email and matches_env_pass) or matches_db
 
-    pw_ok = bool(user and (verify_password(body.password, user.get("password_hash", "")) or verify_password(clean_password, user.get("password_hash", ""))))
     if not pw_ok:
-        logger.warning("[AUTH] Admin login failed: invalid credentials for %s", email)
+        logger.warning("[AUTH] Admin login rejected for email: %s", clean_email)
         raise HTTPException(status_code=401, detail="Incorrect credentials.")
-    if user["role"] != "admin":
-        logger.warning("[AUTH] Admin login failed: %s is not an admin (role: %s)", email, user.get("role"))
-        raise HTTPException(status_code=403, detail="Not an authority account.")
+
+    # Credentials are valid! Ensure user row exists and is synchronized in DB
+    if not user or user.get("role") != "admin" or not verify_password(clean_password, user.get("password_hash", "")):
+        conn = get_connection()
+        try:
+            with conn:
+                if user:
+                    conn.execute(
+                        "UPDATE users SET password_hash = ?, role = 'admin', is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+                        (hash_password(clean_password), user["id"]),
+                    )
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO users (full_name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, 'admin');",
+                        (admin_env_name, clean_email, "", hash_password(clean_password)),
+                    )
+        finally:
+            conn.close()
+        user = get_user_by_email(clean_email)
+
+    if not user:
+        user = {
+            "id": 1,
+            "full_name": admin_env_name,
+            "email": clean_email,
+            "role": "admin",
+        }
 
     token = create_token(user)
     return TokenResponse(
-        access_token=token, role=user["role"],
-        user_id=user["id"], full_name=user.get("full_name", "CivicResolve Admin"), email=user["email"],
+        access_token=token,
+        role="admin",
+        user_id=user["id"],
+        full_name=user.get("full_name", admin_env_name),
+        email=user.get("email", clean_email),
     )
 
 
