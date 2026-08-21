@@ -9,18 +9,28 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import L, { type Map as LeafletMap, type Marker as LeafletMarker, type TileLayer as LeafletTileLayer } from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import type { MapMarker, Complaint } from '../types';
 import PriorityBadge from './PriorityBadge';
 import StatusBadge from './StatusBadge';
 import { getCategoryEmoji } from '../utils/helpers';
-import { X, MapPin, Layers, ArrowRight } from 'lucide-react';
-import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
+import { X, MapPin, Layers, ArrowRight, AlertTriangle, RefreshCw } from 'lucide-react';
+
+// Fix Leaflet default marker icons for Vite bundler
+// @ts-expect-error internal
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
 
 // ── Tile layer definitions ─────────────────────────────────────────────────────
 const TILE_LAYERS = {
   dark: {
     label: 'Dark',
-    url:   'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    url:   'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
     attribution: '© <a href="https://openstreetmap.org/copyright" style="color:#999">OSM</a> © <a href="https://carto.com/attributions" style="color:#999">CARTO</a>',
   },
   satellite: {
@@ -45,9 +55,9 @@ function markerColor(priority: string, status: string): string {
 }
 
 // Build a custom circle SVG marker for Leaflet
-function buildIcon(L: typeof import('leaflet'), color: string, pulse: boolean) {
-  const size   = pulse ? 18 : 14;
-  const svg    = `
+function buildIcon(color: string, pulse: boolean) {
+  const size = pulse ? 18 : 14;
+  const svg = `
     <svg width="${size * 2}" height="${size * 2}" viewBox="0 0 ${size * 2} ${size * 2}" xmlns="http://www.w3.org/2000/svg">
       ${pulse ? `<circle cx="${size}" cy="${size}" r="${size - 1}" fill="${color}" opacity="0.3">
         <animate attributeName="r" values="${size - 5};${size}" dur="1.8s" repeatCount="indefinite"/>
@@ -57,13 +67,12 @@ function buildIcon(L: typeof import('leaflet'), color: string, pulse: boolean) {
       <circle cx="${size}" cy="${size}" r="2.5" fill="white" opacity="0.95"/>
     </svg>`;
   return L.divIcon({
-    html:      svg,
-    className: '',
-    iconSize:  [size * 2, size * 2],
-    iconAnchor:[size, size],
+    html:       svg,
+    className:  '',
+    iconSize:   [size * 2, size * 2],
+    iconAnchor: [size, size],
   });
 }
-
 
 // ── Props ──────────────────────────────────────────────────────────────────────
 interface MapViewProps {
@@ -78,81 +87,104 @@ interface MapViewProps {
 const MapView: React.FC<MapViewProps> = ({
   markers,
   complaints,
-  center = [17.3850, 78.4867],   // Hyderabad (realistic for demo city)
+  center = [17.3850, 78.4867],
   zoom   = 12,
   height = '100%',
 }) => {
-  const containerRef  = useRef<HTMLDivElement>(null);
-  const mapRef        = useRef<LeafletMap | null>(null);
-  const tileRef       = useRef<import('leaflet').TileLayer | null>(null);
-  const markersRef    = useRef<LeafletMarker[]>([]);
-  const [tileKey, setTileKey]       = useState<TileKey>('dark');
-  const [selected, setSelected]     = useState<Complaint | null>(null);
-  const [filter, setFilter]         = useState<'all' | 'HIGH' | 'MEDIUM' | 'LOW'>('all');
-  const [mapReady, setMapReady]     = useState(false);
-  const [leafletLib, setLeafletLib] = useState<typeof import('leaflet') | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef       = useRef<LeafletMap | null>(null);
+  const tileRef      = useRef<LeafletTileLayer | null>(null);
+  const markersRef   = useRef<LeafletMarker[]>([]);
+  const [tileKey, setTileKey]   = useState<TileKey>('dark');
+  const [selected, setSelected] = useState<Complaint | null>(null);
+  const [filter, setFilter]     = useState<'all' | 'HIGH' | 'MEDIUM' | 'LOW'>('all');
+  const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   // ── Initialise map ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current) return;
 
-    import('leaflet').then((L) => {
-      if (!containerRef.current || mapRef.current) return;
+    // Tear down any existing Leaflet map on this container
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch {
+        // ignore
+      }
+      mapRef.current = null;
+    }
 
-      // Fix default icons
-      // @ts-expect-error internal
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-      });
+    const domNode = containerRef.current;
+    if ((domNode as unknown as { _leaflet_id?: unknown })._leaflet_id) {
+      delete (domNode as unknown as { _leaflet_id?: unknown })._leaflet_id;
+    }
 
-      const map = L.map(containerRef.current!, {
+    try {
+      const map = L.map(domNode, {
         center,
         zoom,
         zoomControl: false,
         attributionControl: true,
       });
 
-      // Zoom control — top right
       L.control.zoom({ position: 'topright' }).addTo(map);
 
-      // Initial tile layer
       tileRef.current = L.tileLayer(TILE_LAYERS.dark.url, {
         attribution: TILE_LAYERS.dark.attribution,
         maxZoom: 19,
         subdomains: 'abcd',
       }).addTo(map);
 
-      mapRef.current  = map;
-      setLeafletLib(L);
+      mapRef.current = map;
       setMapReady(true);
-    });
+      setMapError(null);
+
+      // Force tile invalidation after container size calculates
+      setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.invalidateSize();
+        }
+      }, 100);
+    } catch (err) {
+      console.error('[MapView] Failed to initialize Leaflet:', err);
+      setMapError('Failed to load map interface. Please check browser permissions or reload.');
+      setMapReady(false);
+    }
 
     return () => {
-      mapRef.current?.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch {
+          // ignore
+        }
+        mapRef.current = null;
+      }
+      if (domNode && (domNode as unknown as { _leaflet_id?: unknown })._leaflet_id) {
+        delete (domNode as unknown as { _leaflet_id?: unknown })._leaflet_id;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Swap tile layer when user changes style ────────────────────────────────────
   useEffect(() => {
-    if (!mapRef.current || !leafletLib) return;
+    if (!mapRef.current || !mapReady) return;
     if (tileRef.current) {
       mapRef.current.removeLayer(tileRef.current);
     }
-    tileRef.current = leafletLib.tileLayer(TILE_LAYERS[tileKey].url, {
+    tileRef.current = L.tileLayer(TILE_LAYERS[tileKey].url, {
       attribution: TILE_LAYERS[tileKey].attribution,
       maxZoom: 19,
       subdomains: tileKey === 'street' ? 'abc' : 'abcd',
     }).addTo(mapRef.current);
-  }, [tileKey, leafletLib]);
+  }, [tileKey, mapReady]);
 
   // ── Plot complaint markers ────────────────────────────────────────────────────
   useEffect(() => {
-    if (!mapRef.current || !leafletLib || !mapReady) return;
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
 
     // Remove old markers
     markersRef.current.forEach((m) => m.remove());
@@ -160,62 +192,46 @@ const MapView: React.FC<MapViewProps> = ({
 
     const filtered = markers.filter((m) => filter === 'all' || m.priority === filter);
 
-    // Only complaints that have REAL stored coordinates
-    const withCoords = filtered.filter((marker) => {
-      const complaint = complaints.find((c) => c.id === marker.complaintId);
-      const hasCoords = complaint?.latitude != null &&
-        complaint?.longitude != null &&
-        !isNaN(Number(complaint.latitude)) &&
-        !isNaN(Number(complaint.longitude)) &&
-        (Number(complaint.latitude) !== 0 || Number(complaint.longitude) !== 0);
-
-      if (!hasCoords && complaint) {
-        // Log info without creating fake markers
-        console.warn(`Complaint ${complaint.id} has no valid coordinates.`);
-      }
-      return hasCoords;
-    });
-
     const bounds: [number, number][] = [];
 
-    withCoords.forEach((marker) => {
+    filtered.forEach((marker) => {
       const complaint = complaints.find((c) => c.id === marker.complaintId);
       if (!complaint || complaint.latitude == null || complaint.longitude == null) return;
 
       const lat = Number(complaint.latitude);
       const lng = Number(complaint.longitude);
-      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
+      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
 
       bounds.push([lat, lng]);
 
       const color = markerColor(marker.priority, marker.status);
       const isActive = !['Resolved', 'Closed'].includes(marker.status);
-      const icon = buildIcon(leafletLib, color, isActive);
+      const icon = buildIcon(color, isActive);
 
-      const m = leafletLib.marker([lat, lng], { icon })
-        .addTo(mapRef.current!)
+      const m = L.marker([lat, lng], { icon })
+        .addTo(map)
         .on('click', () => setSelected(complaint));
 
       markersRef.current.push(m);
     });
 
-    // Auto-fit map to show all markers when there are multiple
-    if (bounds.length > 1 && mapRef.current) {
+    // Auto-fit map bounds
+    if (bounds.length > 1) {
       try {
-        mapRef.current.fitBounds(bounds as [number, number][], { padding: [40, 40], maxZoom: 15 });
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
       } catch {
-        // fitBounds can fail with edge-case coords — ignore
+        // ignore
       }
-    } else if (bounds.length === 1 && mapRef.current) {
-      mapRef.current.setView(bounds[0], 14);
+    } else if (bounds.length === 1) {
+      map.setView(bounds[0], 14);
     }
-  }, [markers, complaints, filter, mapReady, leafletLib]);
+  }, [markers, complaints, filter, mapReady]);
 
   const filteredCount = markers.filter((m) => filter === 'all' || m.priority === filter).length;
   const withCoordsCount = markers.filter((m) => {
     if (filter !== 'all' && m.priority !== filter) return false;
     const c = complaints.find((x) => x.id === m.complaintId);
-    return c?.latitude != null && c?.longitude != null;
+    return c?.latitude != null && c?.longitude != null && !isNaN(Number(c.latitude)) && !isNaN(Number(c.longitude)) && (Number(c.latitude) !== 0 || Number(c.longitude) !== 0);
   }).length;
   const missingCoordsCount = filteredCount - withCoordsCount;
 
@@ -226,11 +242,28 @@ const MapView: React.FC<MapViewProps> = ({
       <div ref={containerRef} className="w-full h-full" style={{ minHeight: 400 }} />
 
       {/* ── Loading state ────────────────────────────────────────────── */}
-      {!mapReady && (
-        <div className="absolute inset-0 bg-[#111] flex items-center justify-center">
+      {!mapReady && !mapError && (
+        <div className="absolute inset-0 bg-[#111] flex items-center justify-center z-[1001]">
           <div className="text-center">
             <div className="w-10 h-10 border-2 border-[#E10600]/30 border-t-[#E10600] rounded-full animate-spin mx-auto mb-3" />
             <p className="text-white/40 text-sm">Loading map…</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Error state ──────────────────────────────────────────────── */}
+      {mapError && (
+        <div className="absolute inset-0 bg-[#111] flex items-center justify-center z-[1001] p-6">
+          <div className="text-center max-w-sm">
+            <AlertTriangle className="w-8 h-8 text-[#E10600] mx-auto mb-2" />
+            <p className="text-white font-bold text-sm mb-1">Map Loading Issue</p>
+            <p className="text-white/40 text-xs mb-4">{mapError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center gap-2 bg-[#E10600] text-white text-xs font-bold px-3.5 py-2 rounded-xl hover:bg-[#FF1A14] transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Reload Page
+            </button>
           </div>
         </div>
       )}
