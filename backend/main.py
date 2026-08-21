@@ -43,8 +43,8 @@ from fastapi.staticfiles import StaticFiles
 import auth as auth_module
 from auth import (
     create_token, create_user, get_user_by_email, get_user_by_id,
-    require_citizen, require_admin, verify_password,
-    update_user_profile, seed_admin,
+    require_citizen, require_admin, verify_password, hash_password,
+    get_admin_credentials, update_user_profile, seed_admin,
     CREATE_USERS_TABLE, CREATE_USERS_INDEX,
     ADD_CITIZEN_ID_COLUMN, ADD_CITIZEN_ID_INDEX,
 )
