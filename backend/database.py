@@ -13,7 +13,9 @@ Rules:
 import sqlite3
 import os
 import logging
+import re
 from pathlib import Path
+from typing import Any, Optional, Dict, List, Union
 
 logger = logging.getLogger(__name__)
 

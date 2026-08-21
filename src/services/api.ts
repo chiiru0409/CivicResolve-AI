@@ -64,7 +64,16 @@ export async function apiFetch<T = unknown>(
     delete headers['Content-Type'];
   }
 
-  const res = await fetch(url, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...options, headers });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
+      throw new ApiError(503, 'Server connection unavailable. Please check your network or try again in a moment.');
+    }
+    throw new ApiError(500, msg);
+  }
 
   // 401 on protected requests (session expired) — don't trigger for login attempts
   const isAuthAttempt = normalizedPath.includes('/auth/login') || normalizedPath.includes('/auth/admin/login');
@@ -77,10 +86,19 @@ export async function apiFetch<T = unknown>(
   if (!res.ok) {
     let detail: unknown;
     try { detail = await res.json(); } catch { detail = await res.text(); }
-    const message =
+    let message =
       (typeof detail === 'object' && detail !== null && 'detail' in detail)
         ? String((detail as Record<string, unknown>)['detail'])
-        : `Request failed (${res.status})`;
+        : '';
+    if (!message) {
+      message =
+        res.status === 401 ? 'Incorrect email or password.' :
+        res.status === 403 ? 'You are not authorized to perform this action.' :
+        res.status === 404 ? 'Resource not found.' :
+        res.status === 409 ? 'An account with this email already exists. Please log in.' :
+        res.status >= 500  ? 'Server encountered an error. Please try again later.' :
+        `Request failed with status ${res.status}`;
+    }
     throw new ApiError(res.status, message, detail);
   }
 
