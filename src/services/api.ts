@@ -11,13 +11,6 @@
  *   so AuthContext can react without a direct import cycle.
  */
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
-
-/** Backend is the single source of truth */
-export function isBackendAvailable(): boolean {
-  return true;
-}
-
 /** Read the JWT from localStorage. */
 function getToken(): string | null {
   return localStorage.getItem('civic_token');
@@ -45,9 +38,29 @@ export class ApiError extends Error {
   }
 }
 
-function normalizePath(path: string): string {
-  if (path.startsWith('/api/') || path === '/api') return path;
-  return `/api${path.startsWith('/') ? '' : '/'}${path}`;
+/** Construct safe, clean URL for API requests */
+function buildUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+
+  let base = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')).trim().replace(/\/+$/, '');
+  
+  // If base ends with /api, remove it so /api is not duplicated
+  if (base.endsWith('/api')) {
+    base = base.slice(0, -4);
+  }
+
+  let cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (!cleanPath.startsWith('/api/') && cleanPath !== '/api') {
+    cleanPath = `/api${cleanPath}`;
+  }
+
+  if (!base) {
+    return cleanPath;
+  }
+
+  return `${base}${cleanPath}`;
 }
 
 /** Core fetch wrapper. Throws ApiError on non-2xx responses. */
@@ -55,8 +68,7 @@ export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const normalizedPath = normalizePath(path);
-  const url = `${BASE_URL}${normalizedPath}`;
+  const url = buildUrl(path);
   const headers = buildHeaders(options.headers as Record<string, string>);
 
   // Don't set Content-Type for FormData — browser sets it with boundary
@@ -76,7 +88,7 @@ export async function apiFetch<T = unknown>(
   }
 
   // 401 on protected requests (session expired) — don't trigger for login attempts
-  const isAuthAttempt = normalizedPath.includes('/auth/login') || normalizedPath.includes('/auth/admin/login');
+  const isAuthAttempt = path.includes('/auth/login') || path.includes('/auth/admin/login') || url.includes('/auth/login') || url.includes('/auth/admin/login');
   if (res.status === 401 && !isAuthAttempt) {
     localStorage.removeItem('civic_token');
     window.dispatchEvent(new CustomEvent('auth:logout'));
