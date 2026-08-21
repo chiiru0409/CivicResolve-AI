@@ -11,6 +11,11 @@
  *   so AuthContext can react without a direct import cycle.
  */
 
+/** Backend is the single source of truth */
+export function isBackendAvailable(): boolean {
+  return true;
+}
+
 /** Read the JWT from localStorage. */
 function getToken(): string | null {
   return localStorage.getItem('civic_token');
