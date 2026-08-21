@@ -240,24 +240,29 @@ def login(body: UserLogin):
 
 @router.post("/auth/admin/login", response_model=TokenResponse)
 def admin_login(body: AdminLogin):
-    email = body.email.strip().lower()
-    logger.info("[AUTH] Admin login attempt for: %s", email)
-    admin_env_email = os.getenv("ADMIN_EMAIL", "admin@civicresolve.ai").strip().lower()
-    admin_env_pass  = os.getenv("ADMIN_PASSWORD", "admin123")
+    email = body.email.strip().strip("'").strip('"').lower()
+    clean_password = body.password.strip()
+    admin_env_email = os.getenv("ADMIN_EMAIL", "admin@civicresolve.ai").strip().strip("'").strip('"').lower()
+    admin_env_pass  = os.getenv("ADMIN_PASSWORD", "admin123").strip().strip("'").strip('"')
 
     user = get_user_by_email(email)
-    logger.info("[AUTH] Database lookup for %s: found=%s, role=%s", email, bool(user), user.get("role") if user else None)
+    logger.info("[AUTH] Admin login attempt for: %s (env_admin: %s)", email, admin_env_email)
     
-    # If the user is authenticating as the default/configured admin
+    # If the user is authenticating as the configured admin email
     is_default_admin = (email == admin_env_email or email == "admin@civicresolve.ai")
     
     if is_default_admin:
-        # Check against configured password OR db password hash
-        pw_ok = (body.password == admin_env_pass) or (user and verify_password(body.password, user.get("password_hash", "")))
-        logger.info("[AUTH] Default admin verification for %s: success=%s", email, bool(pw_ok))
+        # Check against configured env password OR db password hash
+        pw_ok = (
+            (body.password == admin_env_pass)
+            or (clean_password == admin_env_pass)
+            or (user and verify_password(body.password, user.get("password_hash", "")))
+            or (user and verify_password(clean_password, user.get("password_hash", "")))
+        )
+        logger.info("[AUTH] Admin verification for %s: success=%s", email, bool(pw_ok))
         if pw_ok:
-            # Ensure DB has this admin user properly seeded
-            if not user or user.get("role") != "admin":
+            # Ensure DB has this admin user properly seeded/synchronized
+            if not user or user.get("role") != "admin" or not verify_password(clean_password, user.get("password_hash", "")):
                 seed_admin()
                 user = get_user_by_email(email)
             
@@ -283,8 +288,7 @@ def admin_login(body: AdminLogin):
         seed_admin()
         user = get_user_by_email(email)
 
-    pw_ok = bool(user and verify_password(body.password, user.get("password_hash", "")))
-    logger.info("[AUTH] Database admin verification for %s: success=%s", email, pw_ok)
+    pw_ok = bool(user and (verify_password(body.password, user.get("password_hash", "")) or verify_password(clean_password, user.get("password_hash", ""))))
     if not pw_ok:
         logger.warning("[AUTH] Admin login failed: invalid credentials for %s", email)
         raise HTTPException(status_code=401, detail="Incorrect credentials.")
@@ -293,7 +297,6 @@ def admin_login(body: AdminLogin):
         raise HTTPException(status_code=403, detail="Not an authority account.")
 
     token = create_token(user)
-    logger.info("[AUTH] Admin login successful for %s, token generated.", email)
     return TokenResponse(
         access_token=token, role=user["role"],
         user_id=user["id"], full_name=user.get("full_name", "CivicResolve Admin"), email=user["email"],

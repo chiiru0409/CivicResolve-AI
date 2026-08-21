@@ -268,9 +268,9 @@ def seed_admin() -> None:
       - ADMIN_PASSWORD (from Vercel Environment Variables, fallback: 'admin123')
       - ADMIN_NAME (from Vercel Environment Variables, fallback: 'CivicResolve Admin')
     """
-    admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai").strip().lower()
-    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
-    admin_name     = os.getenv("ADMIN_NAME",     "CivicResolve Admin")
+    admin_email    = os.getenv("ADMIN_EMAIL",    "admin@civicresolve.ai").strip().strip("'").strip('"').lower()
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123").strip().strip("'").strip('"')
+    admin_name     = os.getenv("ADMIN_NAME",     "CivicResolve Admin").strip().strip("'").strip('"')
 
     conn = get_connection()
     try:
