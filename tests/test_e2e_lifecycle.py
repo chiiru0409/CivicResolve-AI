@@ -216,6 +216,70 @@ def run_tests():
     assert "EMAIL_ALREADY_REGISTERED" in dup_reg.text
     print(f"[PASS] Duplicate Registration Protection: 409 EMAIL_ALREADY_REGISTERED correctly returned for duplicate email.")
 
+    # ── Explicit Vamsi Account Lifecycle Test ────────────────────────────────
+    vamsi_email = f"vamsi_{ts}@gmail.com"
+    vamsi_pass = f"vamsi_{ts}@gmail.com"
+    reg_v = client.post("/auth/register", json={
+        "full_name": "Vamsi",
+        "email": vamsi_email,
+        "phone": "+919876543210",
+        "password": vamsi_pass,
+    })
+    assert reg_v.status_code in (200, 201)
+    v_uid = reg_v.json()["user_id"]
+    v_token = reg_v.json()["access_token"]
+
+    # Vamsi Login 1
+    log_v1 = client.post("/auth/login", json={"email": vamsi_email, "password": vamsi_pass})
+    assert log_v1.status_code == 200
+    assert log_v1.json()["user_id"] == v_uid
+
+    # Vamsi submits real complaint
+    comp_v_res = client.post("/complaints", json={
+        "title": "Large pothole near main road",
+        "description": "There is a large pothole on the main road near the residential area. It is creating a safety risk for two-wheelers and vehicles.",
+        "category": "Roads",
+        "department": "Municipal Roads & Infrastructure Department",
+        "priority": "HIGH",
+        "latitude": 17.4325,
+        "longitude": 78.4071,
+        "location": "Main Road, Residential Area, Hyderabad",
+        "evidence_quality": "HIGH / VERIFIED BY PHOTO",
+    }, headers={"Authorization": f"Bearer {log_v1.json()['access_token']}"})
+    assert comp_v_res.status_code in (200, 201)
+    v_cid = comp_v_res.json()["id"]
+
+    # Vamsi check mine
+    mine_v1 = client.get("/complaints/mine", headers={"Authorization": f"Bearer {log_v1.json()['access_token']}"})
+    assert mine_v1.status_code == 200
+    assert any(c["id"] == v_cid for c in mine_v1.json())
+
+    # Vamsi Relogin 2
+    log_v2 = client.post("/auth/login", json={"email": vamsi_email, "password": vamsi_pass})
+    assert log_v2.status_code == 200
+    assert log_v2.json()["user_id"] == v_uid
+    mine_v2 = client.get("/complaints/mine", headers={"Authorization": f"Bearer {log_v2.json()['access_token']}"})
+    assert mine_v2.status_code == 200
+    assert any(c["id"] == v_cid for c in mine_v2.json())
+
+    # Admin verification for Vamsi complaint
+    adm_v = client.post("/auth/admin/login", json={"email": "admin@civicresolve.ai", "password": "admin123"})
+    assert adm_v.status_code == 200
+    adm_v_token = adm_v.json()["access_token"]
+
+    adm_v_comps = client.get("/admin/complaints", headers={"Authorization": f"Bearer {adm_v_token}"})
+    assert adm_v_comps.status_code == 200
+    assert any(c["id"] == v_cid for c in adm_v_comps.json()["items"])
+
+    adm_v_ov = client.get("/admin/overview", headers={"Authorization": f"Bearer {adm_v_token}"})
+    assert adm_v_ov.status_code == 200
+    assert adm_v_ov.json()["total_complaints"] >= 1
+
+    adm_v_map = client.get("/admin/map/incidents", headers={"Authorization": f"Bearer {adm_v_token}"})
+    assert adm_v_map.status_code == 200
+    assert any(m["id"] == v_cid for m in adm_v_map.json())
+    print(f"[PASS] Vamsi Account Lifecycle & Admin Retention: 100% Verified (Complaint ID: {v_cid})")
+
     print("\n=================================================================")
     print("   ALL EXACT USER FLOW REPRODUCTION TESTS PASSED WITH 100% SUCCESS")
     print("=================================================================\n")
