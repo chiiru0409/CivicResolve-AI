@@ -355,7 +355,13 @@ def init_db() -> None:
             for stmt in _INDEXES:
                 conn.execute(stmt)
 
-        # 4. Seed departments (outside the DDL transaction so it can be skipped)
+            # 4. Ensure seed complaints never claim citizen_id
+            try:
+                conn.execute("UPDATE complaints SET citizen_id = NULL, is_anonymous = 1 WHERE id IN ('CR-2026-123994', 'CR-2026-004821', 'CR-2026-004820', 'CR-2026-004819');")
+            except Exception:
+                pass
+
+        # 5. Seed departments (outside the DDL transaction so it can be skipped)
         _seed_departments(conn)
         _seed_initial_complaints(conn)
 
@@ -474,8 +480,8 @@ _INITIAL_COMPLAINTS_SEED = [
         "assigned_team": "Central Roads Team",
         "estimated_response": "24 hours",
         "zone": "Zone 1",
-        "citizen_id": 2,
-        "is_anonymous": 0,
+        "citizen_id": None,
+        "is_anonymous": 1,
         "contact_preference": "email",
         "source": "Web",
         "created_at": "2026-08-20T10:00:00",
@@ -501,8 +507,8 @@ _INITIAL_COMPLAINTS_SEED = [
         "assigned_team": "Central Roads Team",
         "estimated_response": "24-48 hours",
         "zone": "Zone 2",
-        "citizen_id": 2,
-        "is_anonymous": 0,
+        "citizen_id": None,
+        "is_anonymous": 1,
         "contact_preference": "email",
         "source": "Web",
         "created_at": "2026-08-20T12:00:00",
@@ -528,8 +534,8 @@ _INITIAL_COMPLAINTS_SEED = [
         "assigned_team": "Zone 2 Sanitation Team",
         "estimated_response": "12-24 hours",
         "zone": "Zone 3",
-        "citizen_id": 3,
-        "is_anonymous": 0,
+        "citizen_id": None,
+        "is_anonymous": 1,
         "contact_preference": "email",
         "source": "AI Call",
         "created_at": "2026-08-20T14:00:00",
@@ -555,8 +561,8 @@ _INITIAL_COMPLAINTS_SEED = [
         "assigned_team": "Emergency Pump Team",
         "estimated_response": "4-8 hours",
         "zone": "Zone 1",
-        "citizen_id": 2,
-        "is_anonymous": 0,
+        "citizen_id": None,
+        "is_anonymous": 1,
         "contact_preference": "email",
         "source": "Web",
         "created_at": "2026-08-19T09:00:00",

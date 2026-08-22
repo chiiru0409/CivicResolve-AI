@@ -92,7 +92,6 @@ export function useAdminComplaints(filters?: Record<string, string>) {
     setLoading(true);
     setError(null);
     try {
-      if (isBackendAvailable()) {
         // Parse the serialized key back to build URLSearchParams
         const filtersObj: Record<string, string> = JSON.parse(filtersKey) as Record<string, string>;
         const params = new URLSearchParams({ ...filtersObj, _t: Date.now().toString() });
@@ -117,14 +116,8 @@ export function useAdminComplaints(filters?: Record<string, string>) {
         } as unknown as Complaint));
         setComplaints(mapped);
         setTotal(data.total);
-      } else {
-        const { getAllComplaints } = await import('../services/complaintService');
-        const all = getAllComplaints();
-        setComplaints(all);
-        setTotal(all.length);
-      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load.');
+      setError(err instanceof Error ? err.message : 'Failed to load complaints from server.');
     } finally {
       setLoading(false);
     }

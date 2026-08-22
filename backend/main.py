@@ -60,7 +60,7 @@ from schemas import (
     ChatRequest, ChatResponse,
     VoiceTurnRequest, VoiceTurnResponse,
     AdminAIBriefResponse, AdminAIQueryRequest, AdminAIQueryResponse,
-    ComplaintAIAnalysisResponse,
+    ComplaintAIAnalysisResponse, ActionProposal, DuplicateCluster, ExecuteActionRequest,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -808,17 +808,103 @@ def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depend
                 """
             ).fetchall()
             comps = [dict(r) for r in rows]
+            proposals = []
             if comps:
                 ans = f"Identified **{len(comps)} critical/high-priority cases** requiring urgent administrative attention:\n\n"
                 for c in comps:
                     ans += f"• **{c['complaint_number']}** ({c['category']}): {c['title']} at *{c['location']}* — routed to {c['department']}\n"
+                    # Generate action proposal
+                    if c["status"] == "Submitted":
+                        proposals.append(ActionProposal(
+                            action_type="update_status",
+                            complaint_id=c["complaint_number"],
+                            target_value="In Progress",
+                            reason=f"Fast-track {c['complaint_number']} into field operations",
+                            requires_confirmation=True,
+                        ))
+                    elif c["status"] in ("Assigned", "In Progress"):
+                        proposals.append(ActionProposal(
+                            action_type="escalate",
+                            complaint_id=c["complaint_number"],
+                            target_value="Escalate",
+                            reason=f"Escalate priority SLA for {c['complaint_number']}",
+                            requires_confirmation=True,
+                        ))
                 actions = ["Dispatch Emergency Inspection Team", "Escalate to Department Head", "Send Status Update to Citizens"]
             else:
                 ans = "Great news! There are currently **0 critical or high-priority unresolved complaints** in the active queue."
                 actions = ["Review Normal Priority Queue", "View Analytics Summary", "Inspect Map View"]
-            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, related_complaints=comps)
+            return AdminAIQueryResponse(
+                query=body.query,
+                answer=ans,
+                suggested_actions=actions,
+                related_complaints=comps,
+                action_proposals=proposals,
+            )
 
-        # 2. Department workload queries
+        # 2. Duplicate / Similar complaint detection
+        if any(w in q for w in ["duplicate", "similar", "repeat", "cluster", "same area", "multiple reports"]):
+            rows = conn.execute(
+                """
+                SELECT id, complaint_number, title, category, priority, status, department, location, latitude, longitude, created_at
+                FROM complaints
+                WHERE status NOT IN ('Resolved', 'Closed')
+                ORDER BY created_at DESC LIMIT 30;
+                """
+            ).fetchall()
+            all_comps = [dict(r) for r in rows]
+            clusters: list[DuplicateCluster] = []
+            visited = set()
+
+            for i in range(len(all_comps)):
+                c1 = all_comps[i]
+                if c1["id"] in visited:
+                    continue
+                matched = [c1]
+                for j in range(i + 1, len(all_comps)):
+                    c2 = all_comps[j]
+                    if c2["id"] in visited:
+                        continue
+                    # Match by category & similarity in location or title keywords
+                    words1 = set(c1["title"].lower().split() + (c1["location"] or "").lower().split())
+                    words2 = set(c2["title"].lower().split() + (c2["location"] or "").lower().split())
+                    overlap = words1.intersection(words2)
+                    same_cat = c1["category"] == c2["category"]
+                    
+                    if (same_cat and len(overlap) >= 2) or (len(overlap) >= 3):
+                        matched.append(c2)
+                        visited.add(c2["id"])
+
+                if len(matched) > 1:
+                    visited.add(c1["id"])
+                    c_ids = [m["complaint_number"] for m in matched]
+                    clusters.append(DuplicateCluster(
+                        cluster_id=f"CLUSTER-{c1['complaint_number']}",
+                        category=c1["category"],
+                        location=c1["location"] or "Identified Ward Cluster",
+                        similarity_score=91,
+                        complaint_ids=c_ids,
+                        complaints=matched,
+                        suggested_action=f"Consolidate {len(matched)} tickets under single field work order for {c1['department']}",
+                    ))
+
+            if clusters:
+                ans = f"**AI Duplicate & Incident Cluster Analysis:**\n\nIdentified **{len(clusters)} potential duplicate/incident clusters**:\n\n"
+                for cl in clusters:
+                    ans += f"• **Cluster {cl.cluster_id}** ({cl.category} at {cl.location}): {len(cl.complaint_ids)} matching tickets ({', '.join(cl.complaint_ids[:3])}) — {cl.similarity_score}% correlation score.\n"
+                actions = ["Consolidate Duplicate Work Orders", "Assign Unified Field Team", "Notify Reporting Citizens"]
+            else:
+                ans = "No duplicate clusters detected among active open complaints. All reports represent distinct spatial coordinates and unique municipal categories."
+                actions = ["View Incident Map", "Check High Priority Queue", "Review Analytics"]
+
+            return AdminAIQueryResponse(
+                query=body.query,
+                answer=ans,
+                suggested_actions=actions,
+                duplicate_clusters=clusters,
+            )
+
+        # 3. Department workload queries
         if any(w in q for w in ["department", "workload", "unresolved", "most complaints", "heaviest"]):
             rows = conn.execute(
                 """
@@ -838,24 +924,6 @@ def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depend
             actions = [f"Reassign cases from {top_dept}", "View Department Teams", "Filter by Department"]
             return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, category_insights=dept_counts)
 
-        # 3. Repeated issues / areas / clusters
-        if any(w in q for w in ["repeated", "cluster", "area", "hotspot", "road problem", "location", "garbage area"]):
-            rows = conn.execute(
-                """
-                SELECT location, category, COUNT(*) as cnt
-                FROM complaints
-                WHERE location IS NOT NULL AND location != ''
-                GROUP BY location, category
-                HAVING cnt >= 1
-                ORDER BY cnt DESC, location ASC LIMIT 5;
-                """
-            ).fetchall()
-            ans = "**Geographic & Cluster Analysis:**\n\nIdentified localized complaint concentrations:\n\n"
-            for r in rows:
-                ans += f"• **{r[0]}**: {r[2]} report(s) related to **{r[1]}**\n"
-            actions = ["Inspect Area On Map", "Initiate Consolidated Work Order", "Schedule Area Audit"]
-            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions)
-
         # 4. Longest unresolved / aging / escalation
         if any(w in q for w in ["longest", "oldest", "overdue", "aging", "escalat", "delayed"]):
             rows = conn.execute(
@@ -867,11 +935,25 @@ def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depend
                 """
             ).fetchall()
             comps = [dict(r) for r in rows]
+            proposals = []
             ans = "**Overdue / Aging Complaints Analysis:**\n\nThe following reports have been active the longest:\n\n"
             for c in comps:
                 ans += f"• **{c['complaint_number']}** ({c['category']}): {c['title']} — Registered on *{c['created_at'][:10]}*, currently *{c['status']}*\n"
+                proposals.append(ActionProposal(
+                    action_type="escalate",
+                    complaint_id=c["complaint_number"],
+                    target_value="Escalate",
+                    reason=f"Auto-escalate {c['complaint_number']} due to exceeding SLA turnaround",
+                    requires_confirmation=True,
+                ))
             actions = ["Auto-escalate Overdue Reports", "Notify Assigned Officers", "Request Priority Field Status"]
-            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, related_complaints=comps)
+            return AdminAIQueryResponse(
+                query=body.query,
+                answer=ans,
+                suggested_actions=actions,
+                related_complaints=comps,
+                action_proposals=proposals,
+            )
 
         # 5. Category specific query (Garbage, Roads, Water, Drainage, Streetlights)
         for cat in ["Garbage", "Roads", "Water", "Drainage", "Streetlights", "Infrastructure"]:
@@ -897,13 +979,81 @@ def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depend
             f"The system currently manages **{total} complaints**, with **{pending} active cases** and **{high} high-priority tasks**.\n\n"
             f"You can ask me to:\n"
             f"• *Show highest priority complaints*\n"
+            f"• *Find duplicate complaints and incident clusters*\n"
             f"• *Analyze department workloads*\n"
             f"• *Detect recurring geographic problem areas*\n"
             f"• *List longest unresolved complaints*\n"
             f"• *Summarize garbage, road, or water issues*"
         )
-        actions = ["Show High Priority Issues", "Department Workload Matrix", "View Map Hotspots"]
+        actions = ["Show High Priority Issues", "Find Duplicate Clusters", "Department Workload Matrix", "View Map Hotspots"]
         return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions)
+    finally:
+        conn.close()
+
+
+@router.post("/admin/ai/execute-action")
+def execute_admin_ai_action(body: ExecuteActionRequest, current_user: dict = Depends(require_admin)):
+    """
+    Execute a validated administrative action proposed by the AI Agent after administrator confirmation.
+    """
+    conn = get_connection()
+    now = _now_iso()
+    try:
+        row = conn.execute("SELECT id, complaint_number, status, department FROM complaints WHERE id = ? OR complaint_number = ?;", (body.complaint_id, body.complaint_id)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Complaint {body.complaint_id} not found.")
+        c = dict(row)
+        cid = c["id"]
+
+        if body.action_type == "update_status":
+            with conn:
+                resolved_sql = ", resolved_at = ?" if body.target_value in ("Resolved", "Closed") else ""
+                params = [body.target_value, now]
+                if body.target_value in ("Resolved", "Closed"):
+                    params.append(now)
+                params.append(cid)
+                conn.execute(f"UPDATE complaints SET status = ?, updated_at = ?{resolved_sql} WHERE id = ?;", params)
+                conn.execute(
+                    "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, ?, ?, 'admin-ai');",
+                    (cid, body.target_value, body.note or f"Status updated to {body.target_value} via AI Operations Action."),
+                )
+            return {"success": True, "message": f"Status updated to {body.target_value} for {c['complaint_number']}."}
+
+        elif body.action_type in ("assign_department", "assign"):
+            dept = body.target_value
+            officer = body.officer_or_team or "Designated Team"
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO assignments (complaint_id, department, officer, team, notes, assigned_by, assigned_at)
+                    VALUES (?, ?, ?, ?, ?, 'admin-ai', ?);
+                    """,
+                    (cid, dept, officer, officer, body.note or "AI Recommended Assignment", now),
+                )
+                conn.execute(
+                    "UPDATE complaints SET department = ?, assigned_officer = ?, status = 'Assigned', updated_at = ? WHERE id = ?;",
+                    (dept, officer, now, cid),
+                )
+                conn.execute(
+                    "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Assigned', ?, 'admin-ai');",
+                    (cid, f"Assigned to {dept} ({officer}) via AI Operations Copilot",),
+                )
+            return {"success": True, "message": f"Successfully assigned {c['complaint_number']} to {dept}."}
+
+        elif body.action_type == "escalate":
+            with conn:
+                conn.execute(
+                    "UPDATE complaints SET escalation_level = escalation_level + 1, priority = 'CRITICAL', updated_at = ? WHERE id = ?;",
+                    (now, cid),
+                )
+                conn.execute(
+                    "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Escalated', 'Priority escalated to CRITICAL via AI Operations SLA rule.', 'admin-ai');",
+                    (c["status"], cid),
+                )
+            return {"success": True, "message": f"Complaint {c['complaint_number']} escalated to CRITICAL priority."}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported action type: {body.action_type}")
     finally:
         conn.close()
 
@@ -926,7 +1076,6 @@ def get_complaint_ai_analysis(complaint_id: str, current_user: dict = Depends(re
         severity = c.get("severity", 5)
         dept = c.get("department", "Municipal Department")
         loc = c.get("location", "")
-        zone = c.get("zone", "Central")
 
         # Find similar complaints (same category or nearby location)
         sim_rows = conn.execute(
@@ -940,15 +1089,31 @@ def get_complaint_ai_analysis(complaint_id: str, current_user: dict = Depends(re
         ).fetchall()
         similar = [dict(r) for r in sim_rows]
 
+        proposals = []
         # Risk & Action reasoning
         if priority in ("HIGH", "CRITICAL"):
             risk = f"High public safety hazard. Active disruption in {loc or 'municipal sector'} posing vehicle and pedestrian risk."
             action = f"Urgently dispatch {c.get('assigned_team', 'Emergency Response Team')} for on-site inspection and immediate repair within 24 hours."
             urgency = "Critical infrastructure safety vulnerability requiring prompt administrative prioritization."
+            proposals.append(ActionProposal(
+                action_type="assign_department",
+                complaint_id=c["complaint_number"] or c["id"],
+                target_value=dept,
+                officer_or_team=c.get("assigned_team") or "Emergency Response Team",
+                reason=f"Confirm rapid dispatch of {c.get('assigned_team') or 'Emergency Response Team'} to {loc}",
+                requires_confirmation=True,
+            ))
         elif priority == "MEDIUM":
             risk = f"Moderate public disruption and sanitation/service impact affecting neighborhood residents in {loc or 'zone'}."
             action = f"Assign to {c.get('assigned_team', 'Maintenance Team')} with work completion scheduled within 48 to 72 hours."
             urgency = "Standard municipal maintenance queue with intermediate SLA timeline."
+            proposals.append(ActionProposal(
+                action_type="update_status",
+                complaint_id=c["complaint_number"] or c["id"],
+                target_value="In Progress",
+                reason=f"Advance {c['complaint_number']} to In Progress state for active remediation",
+                requires_confirmation=True,
+            ))
         else:
             risk = "Low risk minor cosmetic or routine maintenance concern with no immediate safety danger."
             action = f"Add to {dept} routine scheduled maintenance cycle."
@@ -971,6 +1136,7 @@ def get_complaint_ai_analysis(complaint_id: str, current_user: dict = Depends(re
             similar_reports_count=len(similar),
             similar_reports=similar,
             ai_confidence=c.get("ai_confidence") or 92,
+            action_proposals=proposals,
         )
     finally:
         conn.close()

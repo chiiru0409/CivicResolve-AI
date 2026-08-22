@@ -13,12 +13,12 @@ import type { Complaint } from '../types';
 import mockComplaints from '../data/mockComplaints';
 import { api, isBackendAvailable, ApiError } from './api';
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
+// ── localStorage helpers (offline cache only) ─────────────────────────────────
 const STORAGE_KEY = 'civicresolve_complaints';
 
 function initStorage(): void {
   if (!localStorage.getItem(STORAGE_KEY)) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(mockComplaints));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
   }
 }
 
@@ -27,7 +27,7 @@ function readStorage(): Complaint[] {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY)!) as Complaint[];
   } catch {
-    return mockComplaints;
+    return [];
   }
 }
 

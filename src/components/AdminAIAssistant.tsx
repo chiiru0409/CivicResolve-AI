@@ -6,10 +6,30 @@ import {
 import { api } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
+interface ActionProposal {
+  action_type: string;
+  complaint_id: string;
+  target_value: string;
+  officer_or_team?: string;
+  reason: string;
+  requires_confirmation: boolean;
+}
+
+interface DuplicateCluster {
+  cluster_id: string;
+  category: string;
+  location: string;
+  similarity_score: number;
+  complaint_ids: string[];
+  suggested_action: string;
+}
+
 interface AdminAIResponse {
   query: string;
   answer: string;
   suggested_actions?: string[];
+  action_proposals?: ActionProposal[];
+  duplicate_clusters?: DuplicateCluster[];
   related_complaints?: Array<{
     id: string;
     complaint_number: string;
@@ -34,8 +54,8 @@ interface Message {
 
 const PROMPT_PILLS = [
   { label: '🔴 Urgent Priority Cases', query: 'Show highest priority and urgent complaints' },
+  { label: '🔍 Find Duplicate Reports', query: 'Find duplicate complaints and incident clusters' },
   { label: '🏢 Department Workloads', query: 'Which department has the most unresolved complaints?' },
-  { label: '📍 Problem Hotspots', query: 'Show repeated problem areas and clusters' },
   { label: '⏳ Overdue & Aging Reports', query: 'List longest unresolved complaints' },
   { label: '🗑️ Sanitation & Waste', query: 'Summarize garbage and sanitation complaints' },
   { label: '🛣️ Road Infrastructure', query: 'Summarize roads and pothole issues' },
@@ -47,12 +67,32 @@ export default function AdminAIAssistant() {
     {
       id: 'welcome',
       role: 'assistant',
-      content: 'Civic Operations Intelligence Agent active. Ask about municipal workloads, urgent dispatches, geographic hotspots, or overdue complaints.',
+      content: 'Civic Operations Intelligence Agent active. Ask about municipal workloads, urgent dispatches, duplicate incident clusters, or overdue complaints.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionDone, setActionDone] = useState<Record<string, string>>({});
+
+  const executeAction = async (proposal: ActionProposal) => {
+    const actionKey = `${proposal.action_type}-${proposal.complaint_id}`;
+    setActionLoading(actionKey);
+    try {
+      await api.post('/admin/ai/execute-action', {
+        action_type: proposal.action_type,
+        complaint_id: proposal.complaint_id,
+        target_value: proposal.target_value,
+        officer_or_team: proposal.officer_or_team,
+      });
+      setActionDone((prev) => ({ ...prev, [actionKey]: `Action Confirmed: ${proposal.target_value}` }));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Action execution failed');
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const executeQuery = async (queryText: string) => {
     const q = queryText.trim();
@@ -107,10 +147,10 @@ export default function AdminAIAssistant() {
             <div className="flex items-center gap-2">
               <h2 className="text-white font-black text-sm tracking-wide">Admin AI Operations Copilot</h2>
               <span className="text-[10px] font-black bg-[#E10600]/20 text-[#E10600] border border-[#E10600]/30 px-2 py-0.5 rounded-full">
-                LIVE DB
+                CONTROLLED TOOLS
               </span>
             </div>
-            <p className="text-xs text-white/40">Grounded decision support & workload telemetry</p>
+            <p className="text-xs text-white/40">Grounded decision support & automated operational actions</p>
           </div>
         </div>
         <button
@@ -141,7 +181,7 @@ export default function AdminAIAssistant() {
       </div>
 
       {/* Messages Feed */}
-      <div className="p-5 space-y-4 max-h-[420px] min-h-[220px] overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#222 transparent' }}>
+      <div className="p-5 space-y-4 max-h-[440px] min-h-[220px] overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#222 transparent' }}>
         {messages.map((m) => (
           <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
             <div
@@ -152,6 +192,82 @@ export default function AdminAIAssistant() {
               }`}
             >
               <div className="whitespace-pre-line">{m.content}</div>
+
+              {/* Duplicate Clusters View */}
+              {m.data?.duplicate_clusters && m.data.duplicate_clusters.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                  <p className="text-[11px] font-black text-[#FFC400] uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="w-3 h-3" /> Duplicate Incident Clusters Detected:
+                  </p>
+                  <div className="space-y-2">
+                    {m.data.duplicate_clusters.map((cl) => (
+                      <div key={cl.cluster_id} className="bg-black/40 border border-[#FFC400]/25 rounded-xl p-3">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-mono text-xs font-bold text-white">{cl.cluster_id}</span>
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#FFC400]/15 text-[#FFC400] border border-[#FFC400]/30">
+                            {cl.similarity_score}% CORRELATION
+                          </span>
+                        </div>
+                        <p className="text-xs text-white/80 mb-2">📍 {cl.location} · <span className="text-white/40">{cl.category}</span></p>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {cl.complaint_ids.map((cid) => (
+                            <button
+                              key={cid}
+                              onClick={() => navigate(`/admin/complaints?search=${encodeURIComponent(cid)}`)}
+                              className="font-mono text-[10px] text-white/70 hover:text-white bg-white/8 hover:bg-white/15 px-2 py-0.5 rounded border border-white/10"
+                            >
+                              {cid} ↗
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-[#22C55E] font-medium">💡 Recommendation: {cl.suggested_action}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Proposals Confirmation View */}
+              {m.data?.action_proposals && m.data.action_proposals.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                  <p className="text-[11px] font-black text-[#22C55E] uppercase tracking-wider flex items-center gap-1.5">
+                    <Shield className="w-3 h-3" /> Proposed AI Actions (Confirmation Required):
+                  </p>
+                  <div className="space-y-2">
+                    {m.data.action_proposals.map((prop, idx) => {
+                      const actionKey = `${prop.action_type}-${prop.complaint_id}`;
+                      const isDone = actionDone[actionKey];
+                      const isExecuting = actionLoading === actionKey;
+
+                      return (
+                        <div key={idx} className="bg-black/50 border border-white/10 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-white">{prop.complaint_id}</span>
+                              <span className="text-[10px] font-bold text-white/40 uppercase">{prop.action_type.replace('_', ' ')}</span>
+                            </div>
+                            <p className="text-xs text-white/70 truncate mt-0.5">{prop.reason}</p>
+                          </div>
+
+                          {isDone ? (
+                            <span className="text-[10px] font-bold text-[#22C55E] bg-[#22C55E]/15 border border-[#22C55E]/30 px-2 py-1 rounded-lg">
+                              ✓ Confirmed
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => void executeAction(prop)}
+                              disabled={isExecuting}
+                              className="text-xs font-bold text-white bg-[#E10600] hover:bg-[#FF1A14] disabled:opacity-50 px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 flex-shrink-0 shadow-[0_0_12px_rgba(225,6,0,0.4)]"
+                            >
+                              {isExecuting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Confirm Action'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Related complaints interactive cards */}
               {m.data?.related_complaints && m.data.related_complaints.length > 0 && (
@@ -225,7 +341,7 @@ export default function AdminAIAssistant() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask operations intelligence (e.g. urgent complaints, department loads, hotspots)…"
+          placeholder="Ask operations intelligence (e.g. urgent complaints, duplicate clusters, department loads)…"
           disabled={loading}
           className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-[#E10600]/50 transition-all"
         />

@@ -319,12 +319,33 @@ class AdminAIQueryRequest(BaseModel):
     context: Optional[dict[str, Any]] = None
 
 
+class ActionProposal(BaseModel):
+    action_type: str = Field(..., description="e.g. 'assign_department', 'update_status', 'escalate'")
+    complaint_id: str
+    target_value: str
+    officer_or_team: Optional[str] = None
+    reason: str
+    requires_confirmation: bool = True
+
+
+class DuplicateCluster(BaseModel):
+    cluster_id: str
+    category: str
+    location: str
+    similarity_score: int
+    complaint_ids: list[str]
+    complaints: list[dict[str, Any]]
+    suggested_action: str
+
+
 class AdminAIQueryResponse(BaseModel):
     query: str
     answer: str
     suggested_actions: list[str] = []
+    action_proposals: list[ActionProposal] = []
     related_complaints: list[dict[str, Any]] = []
     category_insights: Optional[dict[str, Any]] = None
+    duplicate_clusters: list[DuplicateCluster] = []
 
 
 class ComplaintAIAnalysisResponse(BaseModel):
@@ -344,6 +365,15 @@ class ComplaintAIAnalysisResponse(BaseModel):
     similar_reports_count: int
     similar_reports: list[dict[str, Any]] = []
     ai_confidence: int
+    action_proposals: list[ActionProposal] = []
+
+
+class ExecuteActionRequest(BaseModel):
+    action_type: str = Field(..., description="'assign_department', 'update_status', 'escalate'")
+    complaint_id: str
+    target_value: str
+    officer_or_team: Optional[str] = None
+    note: Optional[str] = None
 
 
 # ══════════════════════════════════════════════════════════════
