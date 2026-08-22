@@ -183,7 +183,7 @@ def create_user(full_name: str, email: str, phone: str, password: str, role: str
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="An account with this email already exists. Please log in.",
+                detail="EMAIL_ALREADY_REGISTERED: An account with this email already exists. Please log in.",
             )
         hashed = hash_password(password)
         with conn:
@@ -195,7 +195,12 @@ def create_user(full_name: str, email: str, phone: str, password: str, role: str
                 (full_name.strip(), clean_email, phone.strip() if phone else "", hashed, role),
             )
             user_id = cur.lastrowid
-        row = conn.execute("SELECT * FROM users WHERE id = ?;", (user_id,)).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE id = ? OR LOWER(email) = ?;", (user_id, clean_email)).fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Critical: User persistence verification failed. Record could not be read back from database.",
+            )
         return dict(row)
     finally:
         conn.close()

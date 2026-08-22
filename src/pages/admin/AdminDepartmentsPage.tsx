@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, Phone, Users, MapPin } from 'lucide-react';
-import { api, isBackendAvailable } from '../../services/api';
-import { departments } from '../../data/mockDepartments';
+import { api } from '../../services/api';
 import type { Department } from '../../types';
 
 export default function AdminDepartmentsPage() {
-  const [depts, setDepts] = useState<Department[]>(departments);
+  const [depts, setDepts] = useState<Department[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (isBackendAvailable()) {
-      api.get<Department[]>('/admin/departments').then(setDepts).catch(() => {});
-    }
+    api.get<Department[]>('/admin/departments')
+      .then(setDepts)
+      .catch((err) => console.warn('Could not load departments:', err))
+      .finally(() => setLoading(false));
   }, []);
 
   return (

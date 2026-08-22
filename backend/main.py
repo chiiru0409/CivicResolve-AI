@@ -969,6 +969,79 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
         conn.close()
 
 
+@router.get("/admin/overview")
+def admin_overview(current_user: dict = Depends(require_admin)):
+    conn = get_connection()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
+        submitted = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'Submitted';").fetchone()[0]
+        assigned = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'Assigned';").fetchone()[0]
+        in_progress = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'In Progress';").fetchone()[0]
+        inspection = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'Inspection';").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE status IN ('Resolved', 'Closed');").fetchone()[0]
+        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority IN ('HIGH', 'CRITICAL');").fetchone()[0]
+        critical = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority = 'CRITICAL';").fetchone()[0]
+        active_incidents = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed', 'Archived') AND latitude IS NOT NULL AND longitude IS NOT NULL;").fetchone()[0]
+
+        return {
+            "total_complaints": total,
+            "submitted": submitted,
+            "assigned": assigned,
+            "in_progress": in_progress,
+            "inspection": inspection,
+            "resolved": resolved,
+            "high_priority": high_prio,
+            "critical": critical,
+            "active_incidents": active_incidents,
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/admin/map/incidents")
+@router.get("/public/map/incidents")
+def get_map_incidents():
+    """
+    Authoritative query for active map incidents.
+    Returns unresolved complaints (status != Resolved AND status != Closed AND status != Archived)
+    with valid latitude and longitude coordinates.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, complaint_number, title, category, priority, status,
+                   latitude, longitude, location, department, evidence_quality, created_at
+            FROM complaints
+            WHERE status NOT IN ('Resolved', 'Closed', 'Archived')
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+              AND (latitude != 0 OR longitude != 0)
+            ORDER BY created_at DESC;
+            """
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            result.append({
+                "id": d["id"],
+                "complaint_number": d.get("complaint_number") or d["id"],
+                "title": d.get("title") or "Civic Incident",
+                "category": d.get("category") or "Other",
+                "priority": d.get("priority") or "LOW",
+                "status": d.get("status") or "Submitted",
+                "latitude": float(d["latitude"]),
+                "longitude": float(d["longitude"]),
+                "location": d.get("location") or "",
+                "department": d.get("department") or "",
+                "evidence_quality": d.get("evidence_quality") or "LOW",
+                "created_at": d.get("created_at") or "",
+            })
+        return result
+    finally:
+        conn.close()
+
+
 @router.get("/departments")
 @router.get("/admin/departments")
 def list_departments(current_user: Optional[dict] = None):
@@ -1660,22 +1733,29 @@ def openapi_endpoint():
 @app.get("/api")
 @app.get("/health")
 @app.get("/api/health")
+@router.get("/health")
+@router.get("/api/health")
 def root_health():
-    conn = get_connection()
+    conn = None
     is_postgres = False
     comp_count = 0
     user_count = 0
     try:
+        conn = get_connection()
         from database import PostgresConnectionWrapper
         is_postgres = isinstance(conn, PostgresConnectionWrapper)
         row = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()
         comp_count = int(row[0]) if row else 0
         u_row = conn.execute("SELECT COUNT(*) FROM users;").fetchone()
         user_count = int(u_row[0]) if u_row else 0
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("root_health database probe note: %s", exc)
     finally:
-        conn.close()
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     has_db_url = bool(
         os.getenv("DATABASE_URL")

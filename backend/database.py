@@ -52,6 +52,21 @@ if os.environ.get("VERCEL"):
 
 # ── DDL statements ─────────────────────────────────────────────────────────────
 
+_CREATE_USERS = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name     TEXT NOT NULL,
+    email         TEXT UNIQUE NOT NULL,
+    phone         TEXT,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'citizen'
+                  CHECK (role IN ('citizen', 'admin')),
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 _CREATE_COMPLAINTS = """
 CREATE TABLE IF NOT EXISTS complaints (
     id                  TEXT PRIMARY KEY,
@@ -130,7 +145,9 @@ CREATE TABLE IF NOT EXISTS departments (
 
 # ── Index DDL (all IF NOT EXISTS so re-runs are safe) ──────────────────────────
 _INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_users_email                ON users(email);",
     "CREATE INDEX IF NOT EXISTS idx_complaints_complaint_number ON complaints(complaint_number);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_citizen_id       ON complaints(citizen_id);",
     "CREATE INDEX IF NOT EXISTS idx_complaints_status           ON complaints(status);",
     "CREATE INDEX IF NOT EXISTS idx_complaints_priority         ON complaints(priority);",
     "CREATE INDEX IF NOT EXISTS idx_complaints_department       ON complaints(department);",
@@ -208,29 +225,38 @@ class RowWrapper(dict):
         return super().get(key, default)
 
 
+def _convert_sql_to_postgres(sql: str) -> str:
+    pg_sql = sql.replace("?", "%s")
+    pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", pg_sql, flags=re.IGNORECASE)
+    return pg_sql
+
+
 class PostgresCursorWrapper:
     def __init__(self, cur):
         self._cur = cur
         self.lastrowid = None
 
     def execute(self, sql: str, params: Any = None):
-        import re
-        pg_sql = sql.replace("?", "%s")
-        pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
+        pg_sql = _convert_sql_to_postgres(sql)
 
         # Ignore SQLite PRAGMAs on Postgres
         if pg_sql.strip().upper().startswith("PRAGMA"):
             return self
 
+        # Handle INSERT OR IGNORE conflict clause if missing
+        if re.search(r"\bINSERT\s+OR\s+IGNORE\b", sql, re.IGNORECASE) and "ON CONFLICT" not in pg_sql.upper():
+            pg_sql = pg_sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+
         # Capture inserted id for tables with RETURNING
         is_insert = re.search(r"INSERT\s+INTO\s+(\w+)\b", pg_sql, re.IGNORECASE)
-        if is_insert and "RETURNING" not in pg_sql.upper():
+        if is_insert and "RETURNING" not in pg_sql.upper() and "ON CONFLICT DO NOTHING" not in pg_sql.upper():
             table_name = is_insert.group(1).lower()
             if table_name in ("users", "complaint_updates", "assignments"):
                 pg_sql = pg_sql.rstrip().rstrip(";") + " RETURNING id;"
@@ -244,15 +270,9 @@ class PostgresCursorWrapper:
         return self
 
     def executemany(self, sql: str, params_seq: Any):
-        import re
-        pg_sql = sql.replace("?", "%s")
-        pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
-        pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
+        pg_sql = _convert_sql_to_postgres(sql)
+        if re.search(r"\bINSERT\s+OR\s+IGNORE\b", sql, re.IGNORECASE) and "ON CONFLICT" not in pg_sql.upper():
+            pg_sql = pg_sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
         self._cur.executemany(pg_sql, params_seq)
         return self
 
@@ -336,6 +356,7 @@ def get_connection():
     if db_url and db_url.startswith(("postgres://", "postgresql://")):
         try:
             import psycopg2
+            # Handle sslmode parameter for secure cloud hosts
             conn = psycopg2.connect(db_url)
             return PostgresConnectionWrapper(conn)
         except Exception as exc:
@@ -380,7 +401,6 @@ def _table_exists(conn, table: str) -> bool:
         return True
 
 
-
 def init_db() -> None:
     """
     Idempotent initialisation:
@@ -398,7 +418,8 @@ def init_db() -> None:
     conn = get_connection()
     try:
         with conn:   # transaction
-            # 1. Create tables
+            # 1. Create core tables
+            conn.execute(_CREATE_USERS)
             conn.execute(_CREATE_COMPLAINTS)
             conn.execute(_CREATE_COMPLAINT_UPDATES)
             conn.execute(_CREATE_ASSIGNMENTS)
@@ -421,14 +442,16 @@ def init_db() -> None:
                 except Exception as exc:
                     logger.debug("Index creation note: %s", exc)
 
-            # 4. Ensure seed complaints never claim citizen_id
+            # 4. Clean up any historical seed claim
             try:
                 conn.execute("UPDATE complaints SET citizen_id = NULL, is_anonymous = 1 WHERE id IN ('CR-2026-123994', 'CR-2026-004821', 'CR-2026-004820', 'CR-2026-004819');")
             except Exception:
-        # 5. Seed departments (outside the DDL transaction so it can be skipped)
+                pass
+
+        # 5. Seed departments
         _seed_departments(conn)
 
-        logger.info("Database initialised: %s", DB_PATH)
+        logger.info("Database initialised successfully")
     finally:
         conn.close()
 
@@ -505,19 +528,37 @@ _DEPT_SEED = [
 ]
 
 
-def _seed_departments(conn: sqlite3.Connection) -> None:
-    cur = conn.execute("SELECT COUNT(*) as cnt FROM departments;")
-    if cur.fetchone()["cnt"] > 0:
-        return   # already seeded
-    with conn:
-        conn.executemany(
-            """
-            INSERT OR IGNORE INTO departments
-                (id, name, short_name, categories, head, contact, zones, teams, color)
-            VALUES
-                (:id, :name, :short_name, :categories, :head, :contact, :zones, :teams, :color)
-            """,
-            _DEPT_SEED,
+def _seed_departments(conn) -> None:
+    try:
+        cur = conn.execute("SELECT COUNT(*) as cnt FROM departments;")
+        row = cur.fetchone()
+        cnt = row["cnt"] if row and "cnt" in row else (row[0] if row else 0)
+        if cnt > 0:
+            return   # already seeded
+    except Exception:
+        pass
+
+    for d in _DEPT_SEED:
+        try:
+            conn.execute(
+                """
+                INSERT INTO departments
+                    (id, name, short_name, categories, head, contact, zones, teams, color)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    d["id"], d["name"], d["short_name"], d["categories"],
+                    d["head"], d["contact"], d["zones"], d["teams"], d["color"]
+                ),
+            )
+        except Exception as exc:
+            logger.debug("Seed department %s note: %s", d["id"], exc)
+    try:
+        conn.commit()
+    except Exception:
+        pass
     logger.info("Departments seeded (%d rows)", len(_DEPT_SEED))
+
 
 

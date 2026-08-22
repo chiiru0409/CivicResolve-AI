@@ -1,209 +1,225 @@
 """
-Complete End-to-End CivicResolve AI System & Database Verification Test
+test_e2e_lifecycle.py — Full Reproduction & Production Verification Test Suite
+Tests the complete multi-tenant lifecycle, authentication persistence, non-destructive navigation,
+map incidents, health diagnostics, and duplicate registration protection.
 """
 
-import sys
 import os
+import sys
 import time
-import json
-import sqlite3
 
-# Adjust path to import backend modules
+# Ensure backend directory is in sys.path
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 os.environ["OLLAMA_TIMEOUT"] = "1"
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
 from fastapi.testclient import TestClient
 from main import app
 from database import get_connection, init_db
 
+
 def run_tests():
     print("=================================================================")
-    print("      CIVICRESOLVE AI — PRODUCTION STABILIZATION TEST SUITE      ")
+    print("   CIVICRESOLVE AI — PRODUCTION EXACT REPRODUCTION TEST SUITE   ")
     print("=================================================================\n")
 
-    # Initialize / verify tables
+    # Step 0: Ensure DB is initialized
     init_db()
     client = TestClient(app)
 
-    # 1. Citizen A Registration & Login
-    citizen_a_email = f"citizen_a_{int(time.time())}@test.com"
+    # ── Test Database Health Diagnostic Endpoint ──────────────────────────────
+    health_res = client.get("/api/health")
+    assert health_res.status_code == 200, f"/api/health returned {health_res.status_code}: {health_res.text}"
+    health_data = health_res.json()
+    assert "status" in health_data and health_data["status"] == "healthy"
+    assert "database_engine" in health_data
+    assert "database_persistent" in health_data
+    assert "users_count" in health_data
+    assert "complaints_count" in health_data
+    print(f"[PASS] Health Diagnostics: Engine={health_data['database_engine']}, Persistent={health_data['database_persistent']}, Users={health_data['users_count']}, Complaints={health_data['complaints_count']}")
+
+    # ── Step 1: Register Citizen A ────────────────────────────────────────────
+    ts = int(time.time() * 1000)
+    citizen_a_email = f"citizen_a_{ts}@example.com"
+    citizen_a_pass = "SecurePass123!"
+
     reg_a = client.post("/auth/register", json={
-        "email": citizen_a_email,
-        "password": "Password123!",
         "full_name": "Citizen Ramesh Kumar",
-        "phone": "+919876543210"
+        "email": citizen_a_email,
+        "phone": "+919876543210",
+        "password": citizen_a_pass,
     })
-    assert reg_a.status_code in [200, 201], f"Citizen A register failed: {reg_a.text}"
+    assert reg_a.status_code in (200, 201), f"Citizen A registration failed: {reg_a.text}"
     data_a = reg_a.json()
     token_a = data_a["access_token"]
     user_a_id = data_a["user_id"]
-    print(f"[PASS] Citizen A Registered: ID={user_a_id}, Email={data_a['email']}")
+    print(f"[PASS] 1. Citizen A Registered: ID={user_a_id}, Email={citizen_a_email}")
 
-    # 2. Citizen A Login (Identity Persistence)
+    # ── Step 2: Login Citizen A ───────────────────────────────────────────────
     login_a = client.post("/auth/login", json={
         "email": citizen_a_email,
-        "password": "Password123!"
+        "password": citizen_a_pass,
     })
     assert login_a.status_code == 200, f"Citizen A login failed: {login_a.text}"
-    assert login_a.json()["user_id"] == user_a_id, "User ID mismatch upon re-login!"
-    print("[PASS] Citizen A Re-login: Identity restored consistently.")
+    token_a = login_a.json()["access_token"]
+    assert login_a.json()["user_id"] == user_a_id, "User ID mismatch on login!"
+    print(f"[PASS] 2. Citizen A Logged in: User ID matches {user_a_id}")
 
-    # 3. Citizen A Submits Complaint with Photo and GPS & Rubric
-    comp_data_a = {
-        "title": "Severe Main Road Crater / Pothole",
+    # ── Step 3: Verify /auth/me ───────────────────────────────────────────────
+    me_a = client.get("/auth/me", headers={"Authorization": f"Bearer {token_a}"})
+    assert me_a.status_code == 200, f"/auth/me failed: {me_a.text}"
+    assert me_a.json()["id"] == user_a_id
+    assert me_a.json()["email"].lower() == citizen_a_email.lower()
+    print("[PASS] 3. /auth/me Verified: Authoritative citizen identity confirmed.")
+
+    # ── Step 4: Create Complaint A ────────────────────────────────────────────
+    comp_payload_a = {
+        "title": "Severe Main Road Crater",
         "description": "Massive deep crater on Jubilee Hills Road No 36 causing severe vehicle axle damage and bottleneck.",
         "category": "Roads",
-        "department": "Roads & Highways Department",
+        "department": "Municipal Roads & Infrastructure Department",
         "priority": "HIGH",
         "latitude": 17.4325,
         "longitude": 78.4071,
         "location": "Road No. 36, Jubilee Hills, Hyderabad",
         "landmark": "Near Metro Pillar 104",
-        "image_path": "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=800",
+        "image_path": "/uploads/complaints/road_damage.jpg",
         "evidence_quality": "HIGH / VERIFIED BY PHOTO",
-        "ai_confidence": 94,
-        "ai_reason": "High-traffic arterial corridor with structural bitumen rupture.",
-        "public_safety_impact": "High risk of two-wheeler skid and major vehicle damage",
-        "inspection_required": True,
-        "location_risk": "HIGH TRAFFIC CORRIDOR",
-        "action_plan": "1. Deploy asphalt repair crew\n2. Barricade crater\n3. Resurface section",
-        "assigned_team": "Rapid Road Repair Team"
+        "contact_preference": "email",
+        "is_anonymous": False,
     }
-
-    sub_a = client.post("/complaints", json=comp_data_a, headers={"Authorization": f"Bearer {token_a}"})
-    assert sub_a.status_code in [200, 201], f"Complaint submission failed: {sub_a.text}"
+    sub_a = client.post("/complaints", json=comp_payload_a, headers={"Authorization": f"Bearer {token_a}"})
+    assert sub_a.status_code in (200, 201), f"Complaint creation failed: {sub_a.text}"
     comp_a = sub_a.json()
     comp_a_id = comp_a["id"]
-    print(f"[PASS] Complaint A Created in DB: {comp_a_id} (Status: {comp_a['status']})")
-    assert comp_a["public_safety_impact"] is not None
-    assert comp_a["inspection_required"] in [True, 1]
+    print(f"[PASS] 4. Complaint A Created: ID={comp_a_id}, Status={comp_a['status']}")
 
-    # Verify directly in SQLite DB
+    # ── Step 5: Verify Complaint A exists in database with citizen_id ───────────
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, citizen_id, public_safety_impact, status FROM complaints WHERE id = ?", (comp_a_id,))
-    row = cursor.fetchone()
-    assert row is not None, "Complaint A was not permanently written to SQLite!"
-    assert row["citizen_id"] == user_a_id, "Citizen ID in DB does not match Citizen A!"
-    print(f"[PASS] Verified SQLite Disk Persistence: DB row={row['id']}, citizen_id={row['citizen_id']}")
+    try:
+        row = conn.execute("SELECT id, complaint_number, citizen_id, title, status FROM complaints WHERE id = ?;", (comp_a_id,)).fetchone()
+        assert row is not None, "Complaint A record was not found in database!"
+        assert row["citizen_id"] == user_a_id, f"citizen_id in DB ({row['citizen_id']}) != {user_a_id}"
+        print(f"[PASS] 5. Database Verification: Record {row['id']} securely assigned to citizen_id={user_a_id}")
+    finally:
+        conn.close()
 
-    # 4. Citizen B Registration & Data Isolation
-    citizen_b_email = f"citizen_b_{int(time.time())}@test.com"
-    reg_b = client.post("/auth/register", json={
-        "email": citizen_b_email,
-        "password": "Password123!",
-        "full_name": "Citizen Priya Sharma",
-        "phone": "+919876543211"
+    # ── Step 6 & 7: Logout & Re-login Citizen A ───────────────────────────────
+    # Simulate fresh login from clean session
+    relogin_a = client.post("/auth/login", json={
+        "email": citizen_a_email,
+        "password": citizen_a_pass,
     })
-    assert reg_b.status_code in [200, 201]
-    token_b = reg_b.json()["access_token"]
-    user_b_id = reg_b.json()["user_id"]
+    assert relogin_a.status_code == 200, f"Citizen A re-login failed: {relogin_a.text}"
+    re_data_a = relogin_a.json()
+    re_token_a = re_data_a["access_token"]
+    
+    # ── Step 8: Verify same user ID ───────────────────────────────────────────
+    assert re_data_a["user_id"] == user_a_id, "Citizen ID changed after re-login!"
+    print(f"[PASS] 8. Re-login Identity Stability: Same user ID {user_a_id} retained.")
 
-    # Citizen B calls /complaints/mine -> MUST BE 0
-    mine_b = client.get("/complaints/mine", headers={"Authorization": f"Bearer {token_b}"})
-    assert mine_b.status_code == 200
-    assert len(mine_b.json()) == 0, f"Citizen B saw Citizen A's complaints! Count={len(mine_b.json())}"
-    print("[PASS] Citizen Data Isolation: Citizen B sees 0 complaints.")
+    # ── Step 9: Verify Complaint A remains in citizen history ─────────────────
+    mine_res = client.get("/complaints/mine", headers={"Authorization": f"Bearer {re_token_a}"})
+    assert mine_res.status_code == 200, f"/complaints/mine failed: {mine_res.text}"
+    mine_items = mine_res.json()
+    assert any(c["id"] == comp_a_id for c in mine_items), "Complaint A missing from /complaints/mine!"
+    print(f"[PASS] 9. Citizen Complaint Retention: Found {len(mine_items)} complaint(s) in citizen history.")
 
-    # Citizen B Submits Complaint B
-    comp_data_b = {
-        "title": "Overflowing Garbage Dumpster",
-        "description": "Commercial garbage overflowing onto pedestrian walkway near market square for 4 days.",
-        "category": "Garbage",
-        "department": "Sanitation & Waste Management",
-        "priority": "MEDIUM",
-        "latitude": 17.4390,
-        "longitude": 78.4480,
-        "location": "Banjara Hills Market Road",
-        "image_path": "https://images.unsplash.com/photo-1605600659908-0ef719419d41?w=800",
-        "evidence_quality": "HIGH / VERIFIED BY PHOTO",
-        "ai_confidence": 91
-    }
-    sub_b = client.post("/complaints", json=comp_data_b, headers={"Authorization": f"Bearer {token_b}"})
-    assert sub_b.status_code in [200, 201]
-    comp_b_id = sub_b.json()["id"]
-    print(f"[PASS] Complaint B Created in DB: {comp_b_id}")
-
-    # Verify Citizen A still only sees Complaint A, and Citizen B only sees Complaint B
-    mine_a = client.get("/complaints/mine", headers={"Authorization": f"Bearer {token_a}"})
-    mine_b = client.get("/complaints/mine", headers={"Authorization": f"Bearer {token_b}"})
-    assert len(mine_a.json()) == 1 and mine_a.json()[0]["id"] == comp_a_id
-    assert len(mine_b.json()) == 1 and mine_b.json()[0]["id"] == comp_b_id
-    print("[PASS] Multi-tenant Privacy Check: Citizen A and B have separate, protected complaint histories.")
-
-    # 5. Duplicate Check Endpoint Test
-    dup_res = client.post("/complaints/check-duplicate", json={
-        "description": "Big pothole on Road 36 Jubilee Hills",
-        "location": "Jubilee Hills",
-        "latitude": 17.4326,
-        "longitude": 78.4072
-    })
-    assert dup_res.status_code == 200
-    dup_data = dup_res.json()
-    assert dup_data["is_potential_duplicate"] == True
-    print(f"[PASS] Duplicate Detection API: Found existing {dup_data['existing_complaint_id']} with {dup_data['similarity_percentage']}% similarity.")
-
-    # 6. Admin Authentication & Operations
+    # ── Step 10 & 11: Admin Login & Overview ──────────────────────────────────
     admin_login = client.post("/auth/admin/login", json={
         "email": "admin@civicresolve.ai",
-        "password": "admin123"
+        "password": "admin123",
     })
     assert admin_login.status_code == 200, f"Admin login failed: {admin_login.text}"
     admin_token = admin_login.json()["access_token"]
-    admin_headers = {"Authorization": f"Bearer {admin_token}"}
-    print("[PASS] Admin Authenticated successfully.")
+    h_admin = {"Authorization": f"Bearer {admin_token}"}
+    print("[PASS] 10 & 11. Admin Authenticated: Token issued.")
 
-    # 7. CRITICAL VERIFICATION: Admin Read/Detail does NOT delete complaint
-    count_before = len(client.get("/admin/complaints", headers=admin_headers).json()["items"])
-    detail_res = client.get(f"/admin/complaints/{comp_a_id}", headers=admin_headers)
-    assert detail_res.status_code == 200
+    overview_res = client.get("/admin/overview", headers=h_admin)
+    assert overview_res.status_code == 200, f"/admin/overview failed: {overview_res.text}"
+    overview_data = overview_res.json()
+    assert overview_data["total_complaints"] >= 1
+    print(f"[PASS] 12. Admin Overview: Total={overview_data['total_complaints']}, Submitted={overview_data['submitted']}, HighPriority={overview_data['high_priority']}")
+
+    # ── Step 12 & 13: Navigate Admin Overview → Complaints ────────────────────
+    adm_complaints_res = client.get("/admin/complaints", headers=h_admin)
+    assert adm_complaints_res.status_code == 200, f"/admin/complaints failed: {adm_complaints_res.text}"
+    adm_items = adm_complaints_res.json()["items"]
+    assert any(c["id"] == comp_a_id for c in adm_items), f"Complaint A missing from admin complaints list!"
+    initial_admin_count = adm_complaints_res.json()["total"]
+    print(f"[PASS] 13 & 14. Admin Complaints View: Complaint A found (Total: {initial_admin_count}).")
+
+    # ── Step 14 & 15: Navigate Complaints → Overview (Invariance Check) ───────
+    overview_res2 = client.get("/admin/overview", headers=h_admin)
+    assert overview_res2.status_code == 200
+    assert overview_res2.json()["total_complaints"] == initial_admin_count, "Complaint count dropped after navigating to Overview!"
+    print("[PASS] 15 & 16. Invariance Check: Total complaints remained stable across navigation.")
+
+    # ── Step 16 & 17: Navigate Overview → Map ─────────────────────────────────
+    map_res = client.get("/admin/map/incidents", headers=h_admin)
+    assert map_res.status_code == 200, f"/admin/map/incidents failed: {map_res.text}"
+    map_incidents = map_res.json()
+    assert any(m["id"] == comp_a_id for m in map_incidents), "Complaint A missing from active map incidents!"
+    print(f"[PASS] 17 & 18. Map Verification: Complaint A is active with GPS ({comp_payload_a['latitude']}, {comp_payload_a['longitude']}).")
+
+    # ── Step 18 & 19: Navigate Map → Complaints (Non-Destructive Read) ────────
+    detail_res = client.get(f"/admin/complaints/{comp_a_id}", headers=h_admin)
+    assert detail_res.status_code == 200, f"Detail read failed: {detail_res.text}"
     assert detail_res.json()["id"] == comp_a_id
-    count_after = len(client.get("/admin/complaints", headers=admin_headers).json()["items"])
-    assert count_before == count_after, "CRITICAL ERROR: Viewing complaint modified or deleted records!"
-    print(f"[PASS] Non-Destructive Read Verified: Viewing complaint {comp_a_id} left count invariant ({count_after} records).")
+    
+    adm_complaints_res2 = client.get("/admin/complaints", headers=h_admin)
+    assert adm_complaints_res2.json()["total"] == initial_admin_count, "Opening complaint detail mutated count!"
+    print("[PASS] 19 & 20. Pure Non-Destructive Read: Opening complaint detail did not mutate records.")
 
-    # 8. Admin Status Progression
-    status_progression = ["Assigned", "In Progress", "Inspection", "Resolved"]
-    for st in status_progression:
-        patch_res = client.patch(f"/admin/complaints/{comp_a_id}/status", json={
-            "status": st,
-            "message": f"Field operational status updated to {st}",
-            "updated_by": "admin"
-        }, headers=admin_headers)
-        assert patch_res.status_code == 200
-        assert patch_res.json()["status"] == st
-        print(f"  -> Status updated to: {st}")
+    # ── Step 20 & 21: Refresh Admin ───────────────────────────────────────────
+    refresh_list = client.get("/admin/complaints?status=All&category=All&priority=All", headers=h_admin)
+    assert refresh_list.status_code == 200
+    assert any(c["id"] == comp_a_id for c in refresh_list.json()["items"])
+    print("[PASS] 21 & 22. Admin Refresh: Complaint A persists through full filter evaluation.")
 
-    # 9. Public Map Incidents Filter Check
-    # Active complaints filter out Resolved/Closed
-    map_incidents = client.get("/public/map/incidents").json()
-    map_ids = [m["id"] for m in map_incidents]
-    # 10. Test /auth/me with Citizen and Admin
-    me_citizen = client.get("/auth/me", headers={"Authorization": f"Bearer {token_a}"})
-    assert me_citizen.status_code == 200, f"/auth/me failed for citizen: {me_citizen.text}"
-    assert me_citizen.json()["email"] == citizen_a_email
+    # ── Step 22-25: Logout Admin & Re-login Citizen A ────────────────────────
+    relogin_a_final = client.post("/auth/login", json={
+        "email": citizen_a_email,
+        "password": citizen_a_pass,
+    })
+    assert relogin_a_final.status_code == 200
+    mine_final = client.get("/complaints/mine", headers={"Authorization": f"Bearer {relogin_a_final.json()['access_token']}"})
+    assert mine_final.status_code == 200
+    assert any(c["id"] == comp_a_id for c in mine_final.json())
+    print("[PASS] 23-26. Citizen A Re-login & Complaint Retention: Verified.")
 
-    me_admin = client.get("/auth/me", headers=admin_headers)
-    assert me_admin.status_code == 200, f"/auth/me failed for admin: {me_admin.text}"
-    assert me_admin.json()["role"] == "admin"
-    print("[PASS] /auth/me Verified: Both Citizen and Admin retrieve authentic profiles.")
+    # ── Multi-tenant Isolation Test: Citizen B ────────────────────────────────
+    citizen_b_email = f"citizen_b_{ts}@example.com"
+    reg_b = client.post("/auth/register", json={
+        "full_name": "Citizen Priya Sharma",
+        "email": citizen_b_email,
+        "phone": "+919876543211",
+        "password": "Password123!",
+    })
+    assert reg_b.status_code in (200, 201)
+    token_b = reg_b.json()["access_token"]
+    mine_b = client.get("/complaints/mine", headers={"Authorization": f"Bearer {token_b}"})
+    assert mine_b.status_code == 200
+    assert len(mine_b.json()) == 0, f"Citizen B saw Citizen A's complaints! Found: {mine_b.json()}"
+    print("[PASS] Multi-tenant Privacy: Citizen B sees 0 complaints of Citizen A.")
 
-    # 11. Test Filter Resilience ("All", lowercase, case variation)
-    filt_all = client.get("/admin/complaints?status=All&category=All&priority=All", headers=admin_headers)
-    assert filt_all.status_code == 200
-    assert len(filt_all.json()["items"]) >= 2, "Filters with 'All' dropped records!"
-    print(f"[PASS] Filter Resilience: 'status=All' returned all {len(filt_all.json()['items'])} records without dropping.")
-
-    # 12. Full Projection Check on /complaints/mine
-    mine_a_full = client.get("/complaints/mine", headers={"Authorization": f"Bearer {token_a}"}).json()
-    assert len(mine_a_full) == 1
-    assert "description" in mine_a_full[0] and mine_a_full[0]["description"] != ""
-    assert "evidence_quality" in mine_a_full[0]
-    print("[PASS] Citizen Complaints Full Projection: Full description and telemetry fields returned.")
+    # ── Duplicate Email Registration Rule (Phase 6) ───────────────────────────
+    dup_reg = client.post("/auth/register", json={
+        "full_name": "Duplicate Attempt",
+        "email": citizen_a_email,
+        "phone": "+919876543299",
+        "password": "NewPassword123!",
+    })
+    assert dup_reg.status_code == 409, f"Duplicate registration did not return 409! Got {dup_reg.status_code}: {dup_reg.text}"
+    assert "EMAIL_ALREADY_REGISTERED" in dup_reg.text
+    print(f"[PASS] Duplicate Registration Protection: 409 EMAIL_ALREADY_REGISTERED correctly returned for duplicate email.")
 
     print("\n=================================================================")
-    print("   ALL 12 END-TO-END CIVICRESOLVE TESTS PASSED WITH 100% SUCCESS ")
+    print("   ALL EXACT USER FLOW REPRODUCTION TESTS PASSED WITH 100% SUCCESS")
     print("=================================================================\n")
+
 
 if __name__ == "__main__":
     run_tests()

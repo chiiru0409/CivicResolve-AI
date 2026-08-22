@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Menu, Bell, LogOut } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import { useAuth } from '../../hooks/useAuth';
 import { AdminRoute } from '../../components/ProtectedRoute';
-import { useNavigate } from 'react-router-dom';
-import { mockNotifications } from '../../data/mockNotifications';
 import NotificationPanel from '../../components/NotificationPanel';
 import EagleEyeLogo from '../../components/EagleEyeLogo';
 
@@ -24,7 +22,7 @@ export default function AdminLayout() {
   const [notifOpen, setNotifOpen]     = useState(false);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const unread = mockNotifications.filter((n) => !n.read).length;
+  const unread = 0;
 
   const handleLogout = () => { logout(); navigate('/admin/login', { replace: true }); };
 

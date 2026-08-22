@@ -16,7 +16,7 @@ const typeIcons = {
   error:   <AlertCircle className="w-4 h-4 text-[#E10600]" />,
 };
 
-const NotificationPanel: React.FC<NotificationPanelProps> = ({ onClose, notifications = mockNotifications }) => {
+const NotificationPanel: React.FC<NotificationPanelProps> = ({ onClose, notifications = [] }) => {
   const unread = notifications.filter((n) => !n.read).length;
 
   return (
