@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Search, ChevronDown, X, Eye, MapPin, Sparkles,
   AlertTriangle, Shield, Clock, CheckCircle, ArrowUpRight, Loader2
@@ -44,10 +44,11 @@ interface AIAnalysis {
 }
 
 export default function AdminComplaintsPage() {
-  const [search, setSearch]   = useState('');
-  const [cat, setCat]         = useState('All');
-  const [pri, setPri]         = useState('All');
-  const [stat, setStat]       = useState('All');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch]   = useState(() => searchParams.get('search') || '');
+  const [cat, setCat]         = useState(() => searchParams.get('category') || 'All');
+  const [pri, setPri]         = useState(() => searchParams.get('priority') || 'All');
+  const [stat, setStat]       = useState(() => searchParams.get('status') || 'All');
 
   // AI Diagnostic Modal state
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -82,14 +83,17 @@ export default function AdminComplaintsPage() {
     }
   };
 
-  const filters: Record<string, string> = {};
-  if (search) filters.search   = search;
-  if (cat !== 'All') filters.category = cat;
-  if (pri !== 'All') filters.priority = pri;
-  if (stat !== 'All') filters.status  = stat;
+  const filters = useMemo(() => {
+    const f: Record<string, string> = {};
+    if (search.trim()) f.search = search.trim();
+    if (cat !== 'All') f.category = cat;
+    if (pri !== 'All') f.priority = pri;
+    if (stat !== 'All') f.status = stat;
+    return f;
+  }, [search, cat, pri, stat]);
 
   const { complaints, total, loading, error, refetch } = useAdminComplaints(filters);
-  const hasFilters = search || cat !== 'All' || pri !== 'All' || stat !== 'All';
+  const hasFilters = Boolean(search || cat !== 'All' || pri !== 'All' || stat !== 'All');
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">

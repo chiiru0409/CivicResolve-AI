@@ -2,7 +2,7 @@ import React from 'react';
 import MapView from '../../components/MapView';
 import { useAdminComplaints } from '../../hooks/useComplaints';
 import type { Complaint, MapMarker } from '../../types';
-import { Layers, Info } from 'lucide-react';
+import { Layers, Info, AlertTriangle, RefreshCw } from 'lucide-react';
 
 function buildMarkers(complaints: Complaint[]): MapMarker[] {
   return complaints.map((c) => ({
@@ -20,7 +20,7 @@ function buildMarkers(complaints: Complaint[]): MapMarker[] {
 }
 
 export default function AdminMapPage() {
-  const { complaints } = useAdminComplaints();
+  const { complaints, loading, error, refetch } = useAdminComplaints();
   const markers = buildMarkers(complaints);
 
   const high     = complaints.filter((c) => ['HIGH','CRITICAL'].includes(c.priority)).length;
@@ -44,13 +44,35 @@ export default function AdminMapPage() {
     <div className="p-6 flex flex-col gap-5" style={{ height: 'calc(100vh - 56px)' }}>
 
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-black text-white">Civic Issue Map</h1>
-        <p className="text-white/40 text-sm mt-0.5">
-          Each marker is placed at the exact GPS coordinates submitted with the complaint.
-          Click any marker to view complaint details.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-white">Civic Issue Map</h1>
+          <p className="text-white/40 text-sm mt-0.5">
+            Each marker is placed at the exact GPS coordinates submitted with the complaint.
+            Click any marker to view complaint details.
+          </p>
+        </div>
+        <button
+          onClick={() => void refetch()}
+          disabled={loading}
+          className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-3.5 py-2 rounded-xl hover:border-white/20 transition-all self-start sm:self-center"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#E10600]' : ''}`} />
+          <span>Refresh Map</span>
+        </button>
       </div>
+
+      {error && (
+        <div className="card p-4 bg-[#181111] border-[#E10600]/30 rounded-2xl flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-[#E10600] flex-shrink-0" />
+            <p className="text-xs text-white/80">{error}</p>
+          </div>
+          <button onClick={() => void refetch()} className="btn-primary py-1.5 px-3 text-xs font-semibold flex-shrink-0">
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="speed-line" />
 

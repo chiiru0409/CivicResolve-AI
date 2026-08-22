@@ -89,6 +89,11 @@ export async function submitComplaint(
   data: Record<string, unknown>,
 ): Promise<Complaint> {
   const raw = await api.post<Record<string, unknown>>('/complaints', { ...data, source: 'Web' });
+  try {
+    window.dispatchEvent(new CustomEvent('complaints:updated'));
+  } catch {
+    // ignore
+  }
   return mapApiComplaint(raw);
 }
 
@@ -187,6 +192,11 @@ export async function adminUpdateStatus(
     message: message || `Complaint status updated to ${newStatus}`,
     updated_by: 'admin',
   });
+  try {
+    window.dispatchEvent(new CustomEvent('complaints:updated'));
+  } catch {
+    // ignore
+  }
   return mapApiComplaint(raw);
 }
 
@@ -204,6 +214,11 @@ export async function adminAssignComplaint(
     ...data,
     assigned_by: 'admin',
   });
+  try {
+    window.dispatchEvent(new CustomEvent('complaints:updated'));
+  } catch {
+    // ignore
+  }
   return mapApiComplaint(raw);
 }
 
