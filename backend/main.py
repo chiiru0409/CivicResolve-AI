@@ -453,6 +453,11 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
                 )
 
         row = conn.execute("SELECT * FROM complaints WHERE id = ?;", (complaint_id,)).fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Critical: Complaint persistence verification failed. Record could not be read back from database.",
+            )
         updates     = _fetch_updates(conn, complaint_id)
         assignments = _fetch_assignments(conn, complaint_id)
         result = _row_to_complaint_out(dict(row), updates, assignments)
@@ -1664,20 +1669,34 @@ def root_health():
         from database import PostgresConnectionWrapper
         is_postgres = isinstance(conn, PostgresConnectionWrapper)
         row = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()
-        comp_count = row[0] if row else 0
+        comp_count = int(row[0]) if row else 0
         u_row = conn.execute("SELECT COUNT(*) FROM users;").fetchone()
-        user_count = u_row[0] if u_row else 0
+        user_count = int(u_row[0]) if u_row else 0
     except Exception:
         pass
     finally:
         conn.close()
+
+    has_db_url = bool(
+        os.getenv("DATABASE_URL")
+        or os.getenv("POSTGRES_URL")
+        or os.getenv("POSTGRESQL_URL")
+        or os.getenv("POSTGRES_PRISMA_URL")
+        or os.getenv("POSTGRES_URL_NON_POOLING")
+        or os.getenv("NEON_DATABASE_URL")
+        or os.getenv("SUPABASE_DATABASE_URL")
+    )
+    is_persistent = is_postgres or not bool(os.getenv("VERCEL"))
 
     return {
         "status": "healthy",
         "service": "CivicResolve AI API",
         "version": "1.0.0",
         "database_engine": "PostgreSQL" if is_postgres else "SQLite",
-        "database_persistent": is_postgres or not os.getenv("VERCEL"),
+        "database_persistent": is_persistent,
+        "database_host_configured": has_db_url,
+        "users_count": user_count,
+        "complaints_count": comp_count,
         "total_complaints": comp_count,
         "total_users": user_count,
         "environment": "production" if os.getenv("VERCEL") else "development",

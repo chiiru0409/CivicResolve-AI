@@ -337,23 +337,7 @@ def seed_admin() -> None:
                     (admin_name, admin_email, "", hash_password(admin_password)),
                 )
             logger.info("Admin account created from environment configuration: %s", admin_email)
-
-        # 2. Local demo citizen fallback (only if table is completely fresh)
-        demo_citizens = [
-            ("Citizen User", "citizen@civicresolve.ai", "9876543210", "citizen123"),
-        ]
-        for name, email, phone, pwd in demo_citizens:
-            clean_email = email.strip().lower()
-            u_row = conn.execute("SELECT id FROM users WHERE LOWER(email) = ?;", (clean_email,)).fetchone()
-            if not u_row:
-                with conn:
-                    conn.execute(
-                        """
-                        INSERT INTO users (full_name, email, phone, password_hash, role)
-                        VALUES (?, ?, ?, ?, 'citizen');
-                        """,
-                        (name, clean_email, phone, hash_password(pwd)),
-                    )
     finally:
         conn.close()
+
 
