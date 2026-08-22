@@ -167,7 +167,7 @@ export default function AdminComplaintsPage() {
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2.5">
                           <span className="text-base flex-shrink-0 p-1 bg-white/5 rounded-lg">{getCategoryEmoji(c.category)}</span>
-                          <span className="text-sm font-semibold text-white">{truncate(String(c.title ?? ''), 36)}</span>
+                          <span className="text-sm font-semibold text-white">{truncate(String(c.title || c.description || 'Civic Incident'), 36)}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3.5 hidden md:table-cell">

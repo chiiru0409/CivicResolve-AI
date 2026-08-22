@@ -4,8 +4,9 @@ import {
   getMineComplaints,
   getComplaintById,
   trackComplaint,
+  mapApiComplaint,
 } from '../services/complaintService';
-import { api, isBackendAvailable } from '../services/api';
+import { api } from '../services/api';
 
 // ── Citizen: own complaints list ──────────────────────────────────────────────
 export function useCitizenComplaints() {
@@ -92,30 +93,21 @@ export function useAdminComplaints(filters?: Record<string, string>) {
     setLoading(true);
     setError(null);
     try {
-        // Parse the serialized key back to build URLSearchParams
         const filtersObj: Record<string, string> = JSON.parse(filtersKey) as Record<string, string>;
-        const params = new URLSearchParams({ ...filtersObj, _t: Date.now().toString() });
+        const cleanParams: Record<string, string> = {};
+        for (const [k, v] of Object.entries(filtersObj)) {
+          if (v && v !== 'All') {
+            cleanParams[k] = v;
+          }
+        }
+        cleanParams._t = Date.now().toString();
+        const params = new URLSearchParams(cleanParams);
         const data = await api.get<{ total: number; items: Record<string, unknown>[] }>(
           `/admin/complaints?${params.toString()}`,
         );
-        const mapped = data.items.map((raw) => ({
-          id:           raw.complaint_number ?? raw.id,
-          title:        raw.title,
-          category:     raw.category,
-          priority:     raw.priority,
-          status:       raw.status,
-          department:   raw.department,
-          location:     raw.location,
-          latitude:     raw.latitude != null ? Number(raw.latitude) : undefined,
-          longitude:    raw.longitude != null ? Number(raw.longitude) : undefined,
-          landmark:     raw.landmark,
-          source:       (raw.source as string) ?? (raw.contact_preference === 'voice' ? 'AI Call' : 'Web'),
-          submittedAt:  raw.created_at,
-          updatedAt:    raw.updated_at,
-          aiConfidence: raw.ai_confidence,
-        } as unknown as Complaint));
+        const mapped = (data.items || []).map(mapApiComplaint);
         setComplaints(mapped);
-        setTotal(data.total);
+        setTotal(data.total ?? mapped.length);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load complaints from server.');
     } finally {
