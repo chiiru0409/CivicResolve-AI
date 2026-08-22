@@ -655,6 +655,26 @@ def check_duplicate_complaint(body: DuplicateCheckRequest):
         conn.close()
 
 
+def _row_to_map_incident(r) -> dict:
+    d = dict(r) if not isinstance(r, dict) else r
+    created_at = d.get("created_at")
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    return {
+        "id": str(d.get("id") or d.get("complaint_number") or ""),
+        "complaint_number": str(d.get("complaint_number") or d.get("id") or ""),
+        "title": str(d.get("title") or "Civic Incident"),
+        "category": str(d.get("category") or "Other"),
+        "priority": str(d.get("priority") or "MEDIUM"),
+        "status": str(d.get("status") or "Submitted"),
+        "latitude": float(d.get("latitude") or 0.0),
+        "longitude": float(d.get("longitude") or 0.0),
+        "location": str(d.get("location") or "") if d.get("location") else None,
+        "department": str(d.get("department") or "") if d.get("department") else None,
+        "created_at": str(created_at or ""),
+    }
+
+
 @router.get("/public/map/incidents", response_model=list[MapIncident])
 def get_public_map_incidents():
     """
@@ -673,7 +693,7 @@ def get_public_map_incidents():
             ORDER BY created_at DESC LIMIT 200;
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_map_incident(r) for r in rows]
     finally:
         conn.close()
 
@@ -711,7 +731,7 @@ def get_admin_map_incidents(
             """,
             params,
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_map_incident(r) for r in rows]
     finally:
         conn.close()
 
