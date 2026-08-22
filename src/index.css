@@ -540,9 +540,52 @@
 }
 
 /* ═══════════════════════════════════════════════════
+   CINEMATIC STORYTELLING & SECTION PROGRESS
+═══════════════════════════════════════════════════ */
+.section-counter-badge {
+  @apply font-mono text-xs font-black tracking-widest text-white/40 uppercase bg-white/5 border border-white/10 px-3 py-1.5 rounded-full;
+}
+.cinematic-track {
+  position: fixed;
+  left: 2rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+}
+.cinematic-progress-bar {
+  width: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+.cinematic-progress-fill {
+  width: 100%;
+  background: linear-gradient(180deg, #E10600, #FFC400);
+  transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.oversized-heading {
+  font-size: clamp(2.5rem, 6.5vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  font-weight: 900;
+}
+.giant-watermark {
+  position: absolute;
+  font-size: clamp(5rem, 15vw, 16rem);
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  color: rgba(255, 255, 255, 0.02);
+  user-select: none;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ═══════════════════════════════════════════════════
    MOBILE
 ═══════════════════════════════════════════════════ */
 @media (max-width: 640px) {
   .card, .card-elevated { border-radius: 1rem; padding: 1rem; }
   .btn-primary, .btn-secondary { padding: 0.625rem 1rem; font-size: 0.875rem; }
+  .cinematic-track { display: none; }
 }
+

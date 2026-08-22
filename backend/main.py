@@ -59,6 +59,8 @@ from schemas import (
     AnalyticsSummary, DepartmentOut,
     ChatRequest, ChatResponse,
     VoiceTurnRequest, VoiceTurnResponse,
+    AdminAIBriefResponse, AdminAIQueryRequest, AdminAIQueryResponse,
+    ComplaintAIAnalysisResponse,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -711,6 +713,268 @@ def admin_departments(current_user: dict = Depends(require_admin)):
         return result
     finally:
         conn.close()
+
+
+# ── ADMIN AI INTELLIGENCE COMMAND CENTER ENDPOINTS ────────────────────────────
+
+@router.get("/admin/ai/brief", response_model=AdminAIBriefResponse)
+def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
+    """
+    Generate live, ground-truth AI Daily Civic Brief from real complaint records.
+    Calculates actual counts, top workload department, urgency level, and action points.
+    """
+    conn = get_connection()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
+        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority IN ('HIGH', 'CRITICAL');").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed');").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE status IN ('Resolved', 'Closed');").fetchone()[0]
+
+        # Recent complaints count
+        today_cnt = conn.execute(
+            "SELECT COUNT(*) FROM complaints WHERE created_at >= date('now', 'start of day') OR created_at >= datetime('now', '-24 hours');"
+        ).fetchone()[0]
+
+        # Overdue pending count (aged > 48 hours)
+        overdue_cnt = conn.execute(
+            "SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed') AND created_at <= datetime('now', '-48 hours');"
+        ).fetchone()[0]
+
+        by_cat_rows = conn.execute("SELECT category, COUNT(*) as cnt FROM complaints GROUP BY category ORDER BY cnt DESC;").fetchall()
+        cat_counts = {r[0]: r[1] for r in by_cat_rows}
+
+        by_pri_rows = conn.execute("SELECT priority, COUNT(*) as cnt FROM complaints GROUP BY priority;").fetchall()
+        pri_counts = {r[0]: r[1] for r in by_pri_rows}
+
+        by_dep_rows = conn.execute(
+            "SELECT department, COUNT(*) as cnt FROM complaints WHERE status NOT IN ('Resolved', 'Closed') AND department IS NOT NULL GROUP BY department ORDER BY cnt DESC;"
+        ).fetchall()
+        top_dept = by_dep_rows[0][0] if by_dep_rows else "Municipal Roads & Infrastructure Department"
+        top_cat = by_cat_rows[0][0] if by_cat_rows else "Roads"
+
+        urgency_level = "CRITICAL" if high_prio >= 3 else ("HIGH" if high_prio > 0 else "NORMAL")
+
+        ai_summary = (
+            f"Civic Intelligence Brief: {total} total citizen complaints registered. "
+            f"There are {pending} active pending cases across municipal divisions, with {high_prio} high-priority issues requiring immediate dispatch. "
+            f"The heaviest workload is currently on {top_dept} (lead category: {top_cat} with {cat_counts.get(top_cat, 0)} reports). "
+            f"{overdue_cnt} reports are approaching or exceed the 48-hour resolution benchmark."
+        )
+
+        key_bullets = [
+            f"{high_prio} high-priority cases require supervisor assignment or emergency dispatch.",
+            f"Sanitation & Road infrastructure represent {cat_counts.get('Roads', 0) + cat_counts.get('Garbage', 0)} of total municipal reports.",
+            f"{overdue_cnt} complaints are flagged for potential escalation due to aging.",
+            f"Active field resolution rate is currently {round((resolved / total * 100), 1) if total > 0 else 0}% across all wards.",
+        ]
+
+        return AdminAIBriefResponse(
+            total_complaints=total,
+            today_complaints=today_cnt,
+            high_priority_count=high_prio,
+            pending_count=pending,
+            resolved_count=resolved,
+            overdue_count=overdue_cnt,
+            top_department=top_dept,
+            top_category=top_cat,
+            urgency_level=urgency_level,
+            ai_summary=ai_summary,
+            key_bullet_points=key_bullets,
+            category_counts=cat_counts,
+            priority_counts=pri_counts,
+        )
+    finally:
+        conn.close()
+
+
+@router.post("/admin/ai/assistant", response_model=AdminAIQueryResponse)
+def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depends(require_admin)):
+    """
+    Dedicated AI Intelligence Copilot for administrators.
+    Answers administrative decision support queries grounded in actual database records.
+    """
+    conn = get_connection()
+    try:
+        q = body.query.strip().lower()
+
+        # 1. High priority / urgent queries
+        if any(w in q for w in ["high priority", "urgent", "critical", "immediate", "highest priority", "attention"]):
+            rows = conn.execute(
+                """
+                SELECT id, complaint_number, title, category, priority, status, department, location, created_at
+                FROM complaints
+                WHERE priority IN ('HIGH', 'CRITICAL') AND status NOT IN ('Resolved', 'Closed')
+                ORDER BY created_at DESC LIMIT 5;
+                """
+            ).fetchall()
+            comps = [dict(r) for r in rows]
+            if comps:
+                ans = f"Identified **{len(comps)} critical/high-priority cases** requiring urgent administrative attention:\n\n"
+                for c in comps:
+                    ans += f"• **{c['complaint_number']}** ({c['category']}): {c['title']} at *{c['location']}* — routed to {c['department']}\n"
+                actions = ["Dispatch Emergency Inspection Team", "Escalate to Department Head", "Send Status Update to Citizens"]
+            else:
+                ans = "Great news! There are currently **0 critical or high-priority unresolved complaints** in the active queue."
+                actions = ["Review Normal Priority Queue", "View Analytics Summary", "Inspect Map View"]
+            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, related_complaints=comps)
+
+        # 2. Department workload queries
+        if any(w in q for w in ["department", "workload", "unresolved", "most complaints", "heaviest"]):
+            rows = conn.execute(
+                """
+                SELECT department, COUNT(*) as pending_cnt
+                FROM complaints
+                WHERE status NOT IN ('Resolved', 'Closed') AND department IS NOT NULL
+                GROUP BY department
+                ORDER BY pending_cnt DESC;
+                """
+            ).fetchall()
+            dept_counts = {r[0]: r[1] for r in rows}
+            top_dept = rows[0][0] if rows else "Municipal Engineering"
+            top_cnt = rows[0][1] if rows else 0
+            ans = f"**Department Workload Breakdown:**\n\nThe department with the most unresolved complaints is **{top_dept}** with **{top_cnt} active cases**.\n\n"
+            for d, cnt in dept_counts.items():
+                ans += f"• **{d}**: {cnt} open cases\n"
+            actions = [f"Reassign cases from {top_dept}", "View Department Teams", "Filter by Department"]
+            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, category_insights=dept_counts)
+
+        # 3. Repeated issues / areas / clusters
+        if any(w in q for w in ["repeated", "cluster", "area", "hotspot", "road problem", "location", "garbage area"]):
+            rows = conn.execute(
+                """
+                SELECT location, category, COUNT(*) as cnt
+                FROM complaints
+                WHERE location IS NOT NULL AND location != ''
+                GROUP BY location, category
+                HAVING cnt >= 1
+                ORDER BY cnt DESC, location ASC LIMIT 5;
+                """
+            ).fetchall()
+            ans = "**Geographic & Cluster Analysis:**\n\nIdentified localized complaint concentrations:\n\n"
+            for r in rows:
+                ans += f"• **{r[0]}**: {r[2]} report(s) related to **{r[1]}**\n"
+            actions = ["Inspect Area On Map", "Initiate Consolidated Work Order", "Schedule Area Audit"]
+            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions)
+
+        # 4. Longest unresolved / aging / escalation
+        if any(w in q for w in ["longest", "oldest", "overdue", "aging", "escalat", "delayed"]):
+            rows = conn.execute(
+                """
+                SELECT id, complaint_number, title, category, priority, status, department, location, created_at
+                FROM complaints
+                WHERE status NOT IN ('Resolved', 'Closed')
+                ORDER BY created_at ASC LIMIT 4;
+                """
+            ).fetchall()
+            comps = [dict(r) for r in rows]
+            ans = "**Overdue / Aging Complaints Analysis:**\n\nThe following reports have been active the longest:\n\n"
+            for c in comps:
+                ans += f"• **{c['complaint_number']}** ({c['category']}): {c['title']} — Registered on *{c['created_at'][:10]}*, currently *{c['status']}*\n"
+            actions = ["Auto-escalate Overdue Reports", "Notify Assigned Officers", "Request Priority Field Status"]
+            return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, related_complaints=comps)
+
+        # 5. Category specific query (Garbage, Roads, Water, Drainage, Streetlights)
+        for cat in ["Garbage", "Roads", "Water", "Drainage", "Streetlights", "Infrastructure"]:
+            if cat.lower() in q:
+                rows = conn.execute(
+                    "SELECT id, complaint_number, title, priority, status, location FROM complaints WHERE category = ? ORDER BY created_at DESC LIMIT 5;",
+                    (cat,),
+                ).fetchall()
+                total_cat = conn.execute("SELECT COUNT(*) FROM complaints WHERE category = ?;", (cat,)).fetchone()[0]
+                comps = [dict(r) for r in rows]
+                ans = f"**{cat} Civic Summary:**\n\nThere are **{total_cat} total {cat.lower()} complaints** in the system.\n\n"
+                for c in comps:
+                    ans += f"• **{c['complaint_number']}** [{c['priority']}]: {c['title']} at *{c['location']}* ({c['status']})\n"
+                actions = [f"Filter by {cat}", f"Assign {cat} Team", "Export Category Report"]
+                return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions, related_complaints=comps)
+
+        # Default operational summary query
+        total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed');").fetchone()[0]
+        high = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority IN ('HIGH', 'CRITICAL');").fetchone()[0]
+        ans = (
+            f"**Civic Operations Intelligence Summary:**\n\n"
+            f"The system currently manages **{total} complaints**, with **{pending} active cases** and **{high} high-priority tasks**.\n\n"
+            f"You can ask me to:\n"
+            f"• *Show highest priority complaints*\n"
+            f"• *Analyze department workloads*\n"
+            f"• *Detect recurring geographic problem areas*\n"
+            f"• *List longest unresolved complaints*\n"
+            f"• *Summarize garbage, road, or water issues*"
+        )
+        actions = ["Show High Priority Issues", "Department Workload Matrix", "View Map Hotspots"]
+        return AdminAIQueryResponse(query=body.query, answer=ans, suggested_actions=actions)
+    finally:
+        conn.close()
+
+
+@router.get("/admin/ai/analysis/{complaint_id}", response_model=ComplaintAIAnalysisResponse)
+def get_complaint_ai_analysis(complaint_id: str, current_user: dict = Depends(require_admin)):
+    """
+    Generate deep multi-dimensional AI diagnostic analysis for a specific complaint.
+    Includes risk rating, severity, recommended administrative actions, and duplicate detection.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM complaints WHERE id = ? OR complaint_number = ?;", (complaint_id, complaint_id)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Complaint not found.")
+        c = dict(row)
+
+        category = c.get("category", "Other")
+        priority = c.get("priority", "MEDIUM")
+        severity = c.get("severity", 5)
+        dept = c.get("department", "Municipal Department")
+        loc = c.get("location", "")
+        zone = c.get("zone", "Central")
+
+        # Find similar complaints (same category or nearby location)
+        sim_rows = conn.execute(
+            """
+            SELECT id, complaint_number, title, category, priority, status, location, created_at
+            FROM complaints
+            WHERE (category = ? OR location LIKE ?) AND id != ?
+            ORDER BY created_at DESC LIMIT 3;
+            """,
+            (category, f"%{loc[:10]}%" if len(loc) >= 5 else "%XYZ%", c["id"]),
+        ).fetchall()
+        similar = [dict(r) for r in sim_rows]
+
+        # Risk & Action reasoning
+        if priority in ("HIGH", "CRITICAL"):
+            risk = f"High public safety hazard. Active disruption in {loc or 'municipal sector'} posing vehicle and pedestrian risk."
+            action = f"Urgently dispatch {c.get('assigned_team', 'Emergency Response Team')} for on-site inspection and immediate repair within 24 hours."
+            urgency = "Critical infrastructure safety vulnerability requiring prompt administrative prioritization."
+        elif priority == "MEDIUM":
+            risk = f"Moderate public disruption and sanitation/service impact affecting neighborhood residents in {loc or 'zone'}."
+            action = f"Assign to {c.get('assigned_team', 'Maintenance Team')} with work completion scheduled within 48 to 72 hours."
+            urgency = "Standard municipal maintenance queue with intermediate SLA timeline."
+        else:
+            risk = "Low risk minor cosmetic or routine maintenance concern with no immediate safety danger."
+            action = f"Add to {dept} routine scheduled maintenance cycle."
+            urgency = "Routine civic report scheduled for standard batch inspection."
+
+        return ComplaintAIAnalysisResponse(
+            complaint_id=c["complaint_number"] or c["id"],
+            title=c["title"],
+            category=category,
+            subcategory=c.get("subcategory"),
+            priority=priority,
+            severity=severity,
+            department=dept,
+            assigned_team=c.get("assigned_team"),
+            location=loc,
+            risk_assessment=risk,
+            urgency_reasoning=urgency,
+            recommended_action=action,
+            estimated_response=c.get("estimated_response") or ("24-48 hours" if priority == "HIGH" else "48-72 hours"),
+            similar_reports_count=len(similar),
+            similar_reports=similar,
+            ai_confidence=c.get("ai_confidence") or 92,
+        )
+    finally:
+        conn.close()
+
 
 
 @router.get("/llm/status")

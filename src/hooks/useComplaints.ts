@@ -95,7 +95,7 @@ export function useAdminComplaints(filters?: Record<string, string>) {
       if (isBackendAvailable()) {
         // Parse the serialized key back to build URLSearchParams
         const filtersObj: Record<string, string> = JSON.parse(filtersKey) as Record<string, string>;
-        const params = new URLSearchParams(filtersObj);
+        const params = new URLSearchParams({ ...filtersObj, _t: Date.now().toString() });
         const data = await api.get<{ total: number; items: Record<string, unknown>[] }>(
           `/admin/complaints?${params.toString()}`,
         );

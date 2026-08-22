@@ -295,6 +295,58 @@ class ChatResponse(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════
+# ADMIN AI & INTELLIGENCE SCHEMAS
+# ══════════════════════════════════════════════════════════════
+
+class AdminAIBriefResponse(BaseModel):
+    total_complaints: int
+    today_complaints: int
+    high_priority_count: int
+    pending_count: int
+    resolved_count: int
+    overdue_count: int
+    top_department: str
+    top_category: str
+    urgency_level: str
+    ai_summary: str
+    key_bullet_points: list[str] = []
+    category_counts: dict[str, int] = {}
+    priority_counts: dict[str, int] = {}
+
+
+class AdminAIQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000)
+    context: Optional[dict[str, Any]] = None
+
+
+class AdminAIQueryResponse(BaseModel):
+    query: str
+    answer: str
+    suggested_actions: list[str] = []
+    related_complaints: list[dict[str, Any]] = []
+    category_insights: Optional[dict[str, Any]] = None
+
+
+class ComplaintAIAnalysisResponse(BaseModel):
+    complaint_id: str
+    title: str
+    category: str
+    subcategory: Optional[str]
+    priority: str
+    severity: int
+    department: str
+    assigned_team: Optional[str]
+    location: Optional[str]
+    risk_assessment: str
+    urgency_reasoning: str
+    recommended_action: str
+    estimated_response: str
+    similar_reports_count: int
+    similar_reports: list[dict[str, Any]] = []
+    ai_confidence: int
+
+
+# ══════════════════════════════════════════════════════════════
 # VOICE / CALL BOT SCHEMAS
 # ══════════════════════════════════════════════════════════════
 
@@ -313,5 +365,3 @@ class VoiceTurnResponse(BaseModel):
     extracted_data: dict[str, Any]
     action: str = Field("speak", description="'speak', 'listen', 'confirm', 'completed', 'ended'")
     complaint: Optional[dict] = None
-
-

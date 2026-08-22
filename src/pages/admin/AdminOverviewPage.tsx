@@ -1,113 +1,245 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ClipboardList, AlertTriangle, CheckCircle, Clock, ArrowRight, Zap, RefreshCw } from 'lucide-react';
+import {
+  ClipboardList, AlertTriangle, CheckCircle, Clock, ArrowRight, Zap,
+  RefreshCw, Sparkles, Shield, Cpu, MapPin, Layers, ChevronRight
+} from 'lucide-react';
 import DashboardCard from '../../components/DashboardCard';
 import PriorityBadge from '../../components/PriorityBadge';
 import StatusBadge from '../../components/StatusBadge';
+import MapView from '../../components/MapView';
+import AdminAIAssistant from '../../components/AdminAIAssistant';
 import { useAdminComplaints } from '../../hooks/useComplaints';
 import { SkeletonStat } from '../../components/SkeletonCard';
 import { formatDateTime, getCategoryEmoji, truncate } from '../../utils/helpers';
+import { api } from '../../services/api';
+
+interface AdminBrief {
+  total_complaints: number;
+  today_complaints: number;
+  high_priority_count: number;
+  pending_count: number;
+  resolved_count: number;
+  overdue_count: number;
+  top_department: string;
+  top_category: string;
+  urgency_level: string;
+  ai_summary: string;
+  key_bullet_points: string[];
+}
 
 export default function AdminOverviewPage() {
   const { complaints, total, loading, refetch } = useAdminComplaints();
+  const [brief, setBrief] = useState<AdminBrief | null>(null);
+  const [briefLoading, setBriefLoading] = useState(true);
 
-  const high     = complaints.filter((c) => ['HIGH','CRITICAL'].includes(c.priority)).length;
-  const pending  = complaints.filter((c) => !['Resolved','Closed'].includes(c.status)).length;
-  const resolved = complaints.filter((c) => ['Resolved','Closed'].includes(c.status)).length;
+  const fetchBrief = async () => {
+    setBriefLoading(true);
+    try {
+      const data = await api.get<AdminBrief>('/admin/ai/brief');
+      setBrief(data);
+    } catch (err) {
+      console.warn('Could not load AI daily brief:', err);
+    } finally {
+      setBriefLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchBrief();
+  }, []);
+
+  const handleRefreshAll = () => {
+    void refetch();
+    void fetchBrief();
+  };
+
+  const highPriorityCases = complaints.filter((c) => ['HIGH', 'CRITICAL'].includes(c.priority));
+  const pendingCases = complaints.filter((c) => !['Resolved', 'Closed'].includes(c.status));
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-6 lg:p-8 space-y-8 max-w-7xl mx-auto">
+      
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-white">Operations Center</h1>
-          <p className="text-white/40 text-sm mt-0.5">Real-time complaint management</p>
+          <div className="inline-flex items-center gap-2 text-xs font-mono text-[#E10600] bg-[#E10600]/10 border border-[#E10600]/25 px-3 py-1 rounded-full mb-2 uppercase tracking-wider">
+            <Shield className="w-3.5 h-3.5" />
+            <span>Operations Command Center</span>
+          </div>
+          <h1 className="text-3xl font-black text-white tracking-tight">Municipal Operations & Intelligence</h1>
+          <p className="text-white/40 text-sm mt-0.5">Real-time civic dispatch telemetry, AI routing, and workload management</p>
         </div>
-        <button onClick={refetch} disabled={loading}
-          className="flex items-center gap-2 text-sm text-white/40 hover:text-white bg-white/5 border border-white/8 px-3 py-2 rounded-xl hover:border-white/15 transition-all disabled:opacity-50">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#E10600]' : ''}`} /> Refresh
+        <button
+          onClick={handleRefreshAll}
+          disabled={loading || briefLoading}
+          className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-xl hover:border-white/20 transition-all disabled:opacity-50 self-start sm:self-center glow-red-sm"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading || briefLoading ? 'animate-spin text-[#E10600]' : ''}`} />
+          <span>Refresh Operations</span>
         </button>
       </div>
 
-      <div className="speed-line" />
+      {/* ── AI Daily Civic Brief Banner ─────────────────────────────────── */}
+      <div className="card p-6 bg-[#0E0E0E] border-white/10 rounded-3xl relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#E10600] via-[#FFC400] to-[#22C55E]" />
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+          <div className="space-y-3 flex-1">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-[#FFC400]/10 border border-[#FFC400]/30 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-[#FFC400]" />
+              </div>
+              <h2 className="text-base font-black text-white tracking-wide">AI Daily Operations Brief</h2>
+              <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${
+                brief?.urgency_level === 'CRITICAL'
+                  ? 'text-[#E10600] bg-[#E10600]/15 border-[#E10600]/30 animate-pulse'
+                  : 'text-[#FFC400] bg-[#FFC400]/15 border-[#FFC400]/30'
+              }`}>
+                URGENCY: {brief?.urgency_level || 'NORMAL'}
+              </span>
+            </div>
 
+            <p className="text-sm text-white/80 leading-relaxed max-w-4xl font-light">
+              {brief?.ai_summary || 'Analyzing current municipal complaint backlog, active field teams, and critical safety hazards...'}
+            </p>
+
+            {brief?.key_bullet_points && brief.key_bullet_points.length > 0 && (
+              <div className="grid sm:grid-cols-2 gap-2 pt-2">
+                {brief.key_bullet_points.map((pt, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-white/60 bg-white/3 border border-white/6 rounded-xl p-2.5">
+                    <span className="text-[#FFC400] font-bold">⚡</span>
+                    <span>{pt}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-[#141414] border border-white/8 rounded-2xl p-4 flex flex-col gap-2 min-w-[200px] flex-shrink-0">
+            <span className="text-[10px] font-mono text-white/40 uppercase">Top Workload Sector</span>
+            <span className="text-sm font-bold text-white truncate">{brief?.top_department || 'Municipal Engineering'}</span>
+            <div className="flex items-center justify-between text-xs text-white/50 pt-2 border-t border-white/6">
+              <span>Overdue (&gt;48h):</span>
+              <span className="font-mono text-[#E10600] font-bold">{brief?.overdue_count ?? 0} cases</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── KPI Telemetry Cards ────────────────────────────────────────── */}
       {loading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[0,1,2,3].map((i) => <SkeletonStat key={i} />)}
+          {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} />)}
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <DashboardCard title="Total Complaints" value={total} subtitle="All time"      icon={<ClipboardList className="w-6 h-6" />} color="muted"  trend={{ value: 12, label: '' }} />
-          <DashboardCard title="High Priority"    value={high}     subtitle="Need attention" icon={<AlertTriangle  className="w-6 h-6" />} color="red"   />
-          <DashboardCard title="Pending"          value={pending}  subtitle="Open cases"     icon={<Clock          className="w-6 h-6" />} color="yellow" />
-          <DashboardCard title="Resolved"         value={resolved} subtitle="Closed"         icon={<CheckCircle    className="w-6 h-6" />} color="green" trend={{ value: 8, label: '' }} />
+          <DashboardCard
+            title="Total Complaints"
+            value={total}
+            subtitle="Database records"
+            icon={<ClipboardList className="w-6 h-6" />}
+            color="muted"
+          />
+          <DashboardCard
+            title="High Priority"
+            value={highPriorityCases.length}
+            subtitle="Urgent field response"
+            icon={<AlertTriangle className="w-6 h-6" />}
+            color="red"
+          />
+          <DashboardCard
+            title="Pending Actions"
+            value={pendingCases.length}
+            subtitle="Active workflows"
+            icon={<Clock className="w-6 h-6" />}
+            color="yellow"
+          />
+          <DashboardCard
+            title="Resolved"
+            value={complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status)).length}
+            subtitle="Closed out"
+            icon={<CheckCircle className="w-6 h-6" />}
+            color="green"
+          />
         </div>
       )}
 
-      {/* AI routing panel */}
-      <div className="relative bg-[#111] border border-white/8 rounded-2xl p-6 overflow-hidden">
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600]/50 to-transparent" />
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 bg-[#E10600]/10 border border-[#E10600]/20 rounded-xl flex items-center justify-center">
-            <Zap className="w-5 h-5 text-[#E10600]" />
-          </div>
-          <div>
-            <p className="font-black text-white">AI ROUTING ENGINE</p>
-            <p className="text-white/40 text-xs">Last classification sample</p>
-          </div>
-          <div className="ml-auto flex items-center gap-1.5 bg-[#22C55E]/10 border border-[#22C55E]/20 px-3 py-1 rounded-full">
-            <div className="w-1.5 h-1.5 bg-[#22C55E] rounded-full animate-pulse" />
-            <span className="text-xs font-bold text-[#22C55E]">ACTIVE</span>
-          </div>
-        </div>
-        <div className="bg-white/5 border border-white/8 rounded-xl p-4 mb-4">
-          <p className="text-xs text-white/40 mb-2 font-semibold uppercase tracking-wide">Sample Input</p>
-          <p className="text-white/70 text-sm">"There is a large pothole near the main road beside the bus stop. Vehicles are swerving dangerously."</p>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: 'Category', value: 'Roads',                    color: 'text-white' },
-            { label: 'Priority', value: 'HIGH',                     color: 'text-[#E10600]' },
-            { label: 'Dept',     value: 'Roads Dept',               color: 'text-white' },
-            { label: 'Confidence', value: '94%',                    color: 'text-[#FFC400]' },
-          ].map((item) => (
-            <div key={item.label} className="bg-white/5 border border-white/8 rounded-xl p-3">
-              <p className="text-white/40 text-[11px] uppercase tracking-wide font-semibold">{item.label}</p>
-              <p className={`font-black text-sm mt-0.5 ${item.color}`}>{item.value}</p>
+      {/* ── Admin AI Operations Copilot Section ─────────────────────────── */}
+      <AdminAIAssistant />
+
+      {/* ── Priority Dispatch Queue & Map Split ────────────────────────── */}
+      <div className="grid lg:grid-cols-12 gap-6">
+        
+        {/* Priority Dispatch Queue */}
+        <div className="lg:col-span-6 bg-[#0E0E0E] border border-white/8 rounded-3xl overflow-hidden flex flex-col shadow-xl">
+          <div className="p-5 border-b border-white/8 bg-[#111] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-[#E10600]" />
+              <h2 className="font-black text-white text-sm tracking-wide">Priority Dispatch Queue</h2>
             </div>
-          ))}
+            <Link to="/admin/complaints?priority=HIGH" className="text-xs text-[#E10600] hover:text-[#FF1A14] font-bold flex items-center gap-1 transition-colors">
+              View all ({highPriorityCases.length}) <ChevronRight className="w-3 h-3" />
+            </Link>
+          </div>
+
+          <div className="divide-y divide-white/6 overflow-y-auto max-h-[380px]" style={{ scrollbarWidth: 'thin' }}>
+            {highPriorityCases.slice(0, 5).map((c) => (
+              <Link
+                key={c.id}
+                to={`/admin/complaints/${c.id}`}
+                className="p-4 hover:bg-white/4 transition-colors flex items-center justify-between gap-3 group"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-white group-hover:text-[#E10600] transition-colors">{c.id}</span>
+                    <PriorityBadge priority={c.priority} size="sm" />
+                    <StatusBadge status={c.status} size="sm" />
+                  </div>
+                  <p className="text-xs font-semibold text-white/90 truncate mt-1">{c.title}</p>
+                  <p className="text-[11px] text-white/40 truncate">📍 {c.location || 'Location specified'}</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white transition-all flex-shrink-0" />
+              </Link>
+            ))}
+            {highPriorityCases.length === 0 && !loading && (
+              <div className="p-8 text-center text-white/40 text-xs">
+                No high-priority cases pending in the queue.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Live Incident Map */}
+        <div className="lg:col-span-6 bg-[#0E0E0E] border border-white/8 rounded-3xl overflow-hidden flex flex-col shadow-xl">
+          <div className="p-5 border-b border-white/8 bg-[#111] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-[#FFC400]" />
+              <h2 className="font-black text-white text-sm tracking-wide">Live Municipal Hotspot Map</h2>
+            </div>
+            <span className="text-[10px] font-mono text-white/40">GEO-SPATIAL CLUSTER TELEMETRY</span>
+          </div>
+          <div className="h-[380px] relative">
+            <MapView
+              markers={complaints
+                .filter((c) => c.latitude && c.longitude)
+                .map((c) => ({
+                  id: c.id,
+                  complaintId: c.id,
+                  x: 50,
+                  y: 50,
+                  priority: c.priority,
+                  status: c.status,
+                  category: c.category,
+                  title: c.title,
+                  department: c.department || '',
+                  location: c.location || '',
+                }))}
+              complaints={complaints}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Recent complaints */}
-      <div className="bg-[#111] border border-white/8 rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
-          <h2 className="font-black text-white">Recent Complaints</h2>
-          <Link to="/admin/complaints" className="text-sm text-[#E10600] hover:text-[#FF1A14] font-semibold flex items-center gap-1 transition-colors">
-            View all <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-        <div className="divide-y divide-white/8">
-          {complaints.slice(0, 6).map((c) => (
-            <Link key={c.id} to={`/admin/complaints/${c.id}`}
-              className="flex items-center gap-4 px-6 py-4 hover:bg-white/5 transition-colors group">
-              <span className="text-xl flex-shrink-0">{getCategoryEmoji(c.category)}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{truncate(String(c.title ?? ''), 50)}</p>
-                <p className="text-xs text-white/30 font-mono mt-0.5">{c.id}</p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <PriorityBadge priority={c.priority} size="sm" />
-                <StatusBadge status={c.status} size="sm" />
-              </div>
-              <p className="text-xs text-white/30 hidden lg:block flex-shrink-0">{formatDateTime(c.submittedAt)}</p>
-              <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white/60 flex-shrink-0 transition-colors" />
-            </Link>
-          ))}
-          {complaints.length === 0 && !loading && (
-            <div className="py-12 text-center text-white/40 text-sm">No complaints yet.</div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

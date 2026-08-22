@@ -283,14 +283,17 @@ def get_current_user(
 
 
 def require_citizen(current_user: dict = Depends(get_current_user)) -> dict:
-    """Dependency that requires role = citizen OR admin (admin can also read citizen data)."""
-    if current_user.get("role") not in ("citizen", "admin"):
-        raise HTTPException(status_code=403, detail="Citizen access required.")
+    """Dependency that strictly requires role = citizen. Admins cannot access citizen endpoints."""
+    if current_user.get("role") != "citizen":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Citizen access only. Admin users must use /api/admin endpoints.",
+        )
     return current_user
 
 
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    """Dependency that requires role = admin."""
+    """Dependency that strictly requires role = admin."""
     if current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

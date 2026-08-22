@@ -5,6 +5,8 @@ import {
   MapPin, CheckCircle, ChevronRight, Zap,
 } from 'lucide-react';
 import { getChatResponse, resetChatState } from '../services/aiService';
+import { submitComplaint } from '../services/complaintService';
+import { useAuth } from '../hooks/useAuth';
 import type { ChatMessage } from '../types';
 import { useNavigate, useLocation } from 'react-router-dom';
 import EagleEyeLogo from './EagleEyeLogo';
@@ -51,6 +53,7 @@ const WELCOME: EnhancedMessage = {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 const AIChat: React.FC = () => {
+  const { user }                  = useAuth();
   const [open, setOpen]           = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [messages, setMessages]   = useState<EnhancedMessage[]>([WELCOME]);
@@ -343,7 +346,7 @@ const AIChat: React.FC = () => {
                       <div className="ml-9 mt-2">
                         <button
                           onClick={() => { navigate('/report'); setOpen(false); }}
-                          className="flex items-center gap-2 bg-[#E10600] hover:bg-[#C90000] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all w-full justify-center"
+                          className="flex items-center gap-2 bg-[#E10600] hover:bg-[#C90000] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all w-full justify-center shadow-md"
                         >
                           <PlusCircle className="w-3.5 h-3.5" />
                           File Official Complaint
@@ -352,23 +355,59 @@ const AIChat: React.FC = () => {
                       </div>
                     )}
 
-                    {/* File complaint CTA with analysis card */}
+                    {/* File complaint CTA with analysis card & 1-click submit */}
                     {msg.suggestComplaint && msg.analysisCard && (
-                      <div className="ml-9 mt-2 flex gap-2">
-                        <button
-                          onClick={() => { navigate('/report'); setOpen(false); }}
-                          className="flex-1 flex items-center justify-center gap-1.5 bg-[#E10600] hover:bg-[#C90000] text-white text-xs font-bold px-3 py-2.5 rounded-xl transition-all"
-                        >
-                          <PlusCircle className="w-3.5 h-3.5" />
-                          File Complaint
-                        </button>
-                        <button
-                          onClick={() => { navigate('/track'); setOpen(false); }}
-                          className="flex items-center justify-center gap-1.5 bg-white/8 hover:bg-white/12 border border-white/10 text-white/60 hover:text-white text-xs font-semibold px-3 py-2.5 rounded-xl transition-all"
-                        >
-                          <MapPin className="w-3.5 h-3.5" />
-                          Track
-                        </button>
+                      <div className="ml-9 mt-2 flex flex-col gap-2">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              if (!user) {
+                                navigate('/login', { state: { from: '/report' } });
+                                setOpen(false);
+                                return;
+                              }
+                              setLoading(true);
+                              try {
+                                const created = await submitComplaint({
+                                  description: messages.filter((m) => m.role === 'user').slice(-1)[0]?.content || 'Civic issue reported via AI Chat assistant',
+                                  category: msg.analysisCard?.category || 'Other',
+                                  priority: msg.analysisCard?.priority || 'MEDIUM',
+                                  department: msg.analysisCard?.department,
+                                  location: 'Reported via Civic AI Chat',
+                                });
+                                const successMsg: EnhancedMessage = {
+                                  id: (Date.now() + 1).toString(),
+                                  role: 'assistant',
+                                  content: `🎉 **Complaint Successfully Registered!**\n\nYour Complaint ID is **\`${created.id}\`**.\n\nOur **${created.department || 'municipal'}** team has been notified. You can track live updates at any time.`,
+                                  timestamp: new Date().toISOString(),
+                                  quickReplies: [`Track ${created.id}`, 'Report a new issue'],
+                                };
+                                setMessages((prev) => [...prev, successMsg]);
+                              } catch (err) {
+                                setMessages((prev) => [...prev, {
+                                  id: (Date.now() + 1).toString(),
+                                  role: 'assistant',
+                                  content: 'Could not auto-submit complaint. Please use the full complaint form.',
+                                  timestamp: new Date().toISOString(),
+                                  suggestComplaint: true,
+                                }]);
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#E10600] hover:bg-[#C90000] text-white text-xs font-bold px-3 py-2.5 rounded-xl transition-all shadow-md"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            Confirm & Submit (1-Click)
+                          </button>
+                          <button
+                            onClick={() => { navigate('/report'); setOpen(false); }}
+                            className="flex items-center justify-center gap-1.5 bg-white/8 hover:bg-white/12 border border-white/10 text-white/70 hover:text-white text-xs font-semibold px-3 py-2.5 rounded-xl transition-all"
+                          >
+                            <PlusCircle className="w-3.5 h-3.5" />
+                            Full Form
+                          </button>
+                        </div>
                       </div>
                     )}
 
