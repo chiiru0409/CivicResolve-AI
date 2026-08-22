@@ -103,6 +103,8 @@ class ComplaintCreate(BaseModel):
     zone: Optional[str] = Field(None, max_length=50)
     assigned_team: Optional[str] = Field(None, max_length=200)
     source: Optional[str] = Field("Web", max_length=50)
+    image_path: Optional[str] = None
+    evidence_quality: Optional[str] = None
 
     @field_validator("category")
     @classmethod
@@ -190,6 +192,7 @@ class ComplaintOut(BaseModel):
     address: Optional[str]
     landmark: Optional[str]
     image_path: Optional[str]
+    evidence_quality: Optional[str] = None
     ai_analysis: Optional[Any]
     ai_confidence: Optional[int]
     ai_reason: Optional[str]

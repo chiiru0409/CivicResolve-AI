@@ -73,6 +73,8 @@ export interface Complaint {
   longitude?: number;
   landmark?: string;
   imageUrl?: string;
+  evidenceQuality?: string;
+  aiAnalysis?: Record<string, unknown>;
   submittedAt: string;
   updatedAt: string;
   assignedTo?: string;

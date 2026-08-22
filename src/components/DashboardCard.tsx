@@ -22,19 +22,19 @@ const DashboardCard: React.FC<DashboardCardProps> = ({ title, value, subtitle, i
   const c = colorMap[color];
 
   return (
-    <div className={`telemetry-card bg-gradient-to-br ${c.accent} to-transparent`}>
-      <div className="flex items-start justify-between mb-4">
-        <div className={`w-11 h-11 rounded-xl ${c.icon} flex items-center justify-center flex-shrink-0`}>
+    <div className={`telemetry-card glass-panel-luxury p-5 rounded-2xl border border-white/8 hover:border-white/20 transition-all bg-gradient-to-br ${c.accent} to-transparent`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className={`w-11 h-11 rounded-xl ${c.icon} flex items-center justify-center flex-shrink-0 border border-white/10 shadow-md`}>
           {icon}
         </div>
         {trend && (
           <div
-            className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${
+            className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full font-mono ${
               trend.value > 0
-                ? 'bg-civic-success/10 text-civic-success'
+                ? 'bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20'
                 : trend.value < 0
-                ? 'bg-civic-red/10 text-civic-red'
-                : 'bg-civic-elevated text-civic-muted'
+                ? 'bg-[#E10600]/10 text-[#E10600] border border-[#E10600]/20'
+                : 'bg-white/5 text-white/50 border border-white/10'
             }`}
           >
             {trend.value > 0 ? <TrendingUp className="w-3 h-3" /> : trend.value < 0 ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
@@ -42,9 +42,9 @@ const DashboardCard: React.FC<DashboardCardProps> = ({ title, value, subtitle, i
           </div>
         )}
       </div>
-      <p className={`text-3xl font-black ${c.value} tabular-nums leading-none`}>{value}</p>
-      <p className="text-sm font-semibold text-civic-text mt-1.5">{title}</p>
-      {subtitle && <p className="text-xs text-civic-muted mt-0.5">{subtitle}</p>}
+      <p className={`text-3xl sm:text-4xl font-black ${c.value} tabular-nums leading-none font-display tracking-tight`}>{value}</p>
+      <p className="text-xs sm:text-sm font-bold text-white mt-2 font-display">{title}</p>
+      {subtitle && <p className="text-[11px] text-white/40 mt-0.5 font-mono">{subtitle}</p>}
     </div>
   );
 };

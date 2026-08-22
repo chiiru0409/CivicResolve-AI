@@ -196,17 +196,20 @@ def _row_to_complaint_out(row: dict, updates: list, assignments: list) -> dict:
         except Exception:
             d["ai_analysis"] = None
     d["is_anonymous"] = bool(d.get("is_anonymous", 0))
+    d["evidence_quality"] = d.get("evidence_quality") or (
+        "HIGH / VERIFIED BY PHOTO" if d.get("image_path") else "LOW — No photo proof provided"
+    )
     d["updates"] = updates
     d["assignments"] = assignments
     return d
 
 
-def _build_initial_updates(complaint_id: str, category: str, priority: str, department: str) -> list[dict]:
+def _build_initial_updates(complaint_id: str, category: str, priority: str, department: str, evidence_quality: str = "LOW — No photo proof provided") -> list[dict]:
     """Insert the first two update records for a new complaint."""
     now = _now_iso()
     updates = [
-        {"complaint_id": complaint_id, "status": "Submitted",    "message": "Complaint received and submitted.",                       "updated_by": "system"},
-        {"complaint_id": complaint_id, "status": "AI_Analysis",  "message": f"AI classified: {category} | Priority: {priority} | Department: {department}", "updated_by": "ai-agent"},
+        {"complaint_id": complaint_id, "status": "Submitted",    "message": "Complaint received and logged in municipal database.",                       "updated_by": "system"},
+        {"complaint_id": complaint_id, "status": "AI_Analysis",  "message": f"AI classified: {category} | Priority: {priority} | Department: {department} | Evidence: {evidence_quality}", "updated_by": "ai-agent"},
     ]
     return updates
 
@@ -341,13 +344,24 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
     # Run AI analysis (backend is always authoritative for classification)
     ai = run_analysis(body.description, body.location, body.latitude, body.longitude)
 
+    # Determine photo evidence and quality
+    has_photo = bool(body.image_path and body.image_path.strip())
+    image_path = body.image_path.strip() if has_photo else None
+    evidence_quality = "HIGH / VERIFIED BY PHOTO" if has_photo else "LOW — No photo proof provided"
+
     # Use frontend hints if provided and valid, else use backend result
     category   = body.category   or ai["category"]
     priority   = body.priority   or ai["priority"]
     department = body.department or ai["department_name"]
     title      = body.title      or ai["title"]
-    confidence = body.ai_confidence if body.ai_confidence is not None else ai["ai_confidence"]
+    base_conf  = body.ai_confidence if body.ai_confidence is not None else ai["ai_confidence"]
+    # Reduce confidence if no photo proof was provided
+    confidence = base_conf if has_photo else max(50, base_conf - 15)
+    
     reason     = body.ai_reason  or ai["ai_reason"]
+    if not has_photo and "photo proof" not in reason.lower():
+        reason = f"{reason} (Notice: Submitted without photo proof; verification confidence reduced.)"
+
     response_t = body.estimated_response or ai["estimated_response"]
     zone       = body.zone       or ai["zone"]
     team       = body.assigned_team or ai["assigned_team"]
@@ -366,6 +380,7 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
                     category, department, priority, severity, status,
                     latitude, longitude, location_accuracy,
                     location, address, landmark,
+                    image_path, evidence_quality,
                     ai_confidence, ai_reason,
                     assigned_team, estimated_response, zone,
                     is_anonymous, contact_preference, source,
@@ -376,6 +391,7 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
                     ?, ?, ?,
                     ?, ?, ?,
                     ?, ?,
+                    ?, ?,
                     ?, ?, ?,
                     ?, ?, ?,
                     ?, ?
@@ -383,9 +399,10 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
                 """,
                 (
                     complaint_id, complaint_number, citizen_id, title, body.description,
-                    category, department, priority, ai["severity"], 
+                    category, department, priority, ai["severity"],
                     body.latitude, body.longitude, body.location_accuracy,
                     body.location, body.address, body.landmark,
+                    image_path, evidence_quality,
                     confidence, reason,
                     team, response_t, zone,
                     1 if body.is_anonymous else 0, body.contact_preference, body.source or "Web",
@@ -393,7 +410,7 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
                 ),
             )
             # Insert initial update records
-            for upd in _build_initial_updates(complaint_id, category, priority, department):
+            for upd in _build_initial_updates(complaint_id, category, priority, department, evidence_quality):
                 conn.execute(
                     "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, ?, ?, ?);",
                     (upd["complaint_id"], upd["status"], upd["message"], upd["updated_by"]),
@@ -1048,7 +1065,7 @@ def execute_admin_ai_action(body: ExecuteActionRequest, current_user: dict = Dep
                 )
                 conn.execute(
                     "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Escalated', 'Priority escalated to CRITICAL via AI Operations SLA rule.', 'admin-ai');",
-                    (c["status"], cid),
+                    (cid,),
                 )
             return {"success": True, "message": f"Complaint {c['complaint_number']} escalated to CRITICAL priority."}
 

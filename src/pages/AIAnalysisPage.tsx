@@ -68,6 +68,8 @@ const AIAnalysisPage: React.FC = () => {
         landmark:           pendingData.landmark  || undefined,
         contact_preference: pendingData.contactPreference || 'email',
         is_anonymous:       pendingData.isAnonymous === 'true',
+        image_path:         pendingData.imageUrl || undefined,
+        evidence_quality:   pendingData.imageUrl ? 'HIGH / VERIFIED BY PHOTO' : 'LOW — No photo proof provided',
         title:              analysis.title,
         category:           analysis.category,
         priority:           analysis.priority,

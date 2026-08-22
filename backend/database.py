@@ -163,6 +163,7 @@ _MIGRATION_COLUMNS = [
     ("complaints", "source",             "TEXT DEFAULT 'Web'"),
     ("complaints", "resolved_at",        "TEXT"),
     ("complaints", "complaint_number",   "TEXT"),   # may already exist
+    ("complaints", "evidence_quality",   "TEXT DEFAULT 'LOW — No photo proof provided'"),
     ("complaint_updates", "updated_by",  "TEXT DEFAULT 'system'"),
     ("assignments", "officer",           "TEXT"),
     ("assignments", "team",              "TEXT"),

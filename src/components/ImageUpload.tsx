@@ -15,17 +15,23 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageUploaded }) => {
 
   const handleFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) return;
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    setAnalyzing(true);
-    setAnalysis(null);
-    try {
-      const result = await analyzeImage(file);
-      setAnalysis(result);
-      onImageUploaded(file, url, result);
-    } finally {
-      setAnalyzing(false);
-    }
+    
+    // Convert to Data URL for persistent storage across sessionStorage and DB
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      setPreview(dataUrl);
+      setAnalyzing(true);
+      setAnalysis(null);
+      try {
+        const result = await analyzeImage(file);
+        setAnalysis(result);
+        onImageUploaded(file, dataUrl, result);
+      } finally {
+        setAnalyzing(false);
+      }
+    };
+    reader.readAsDataURL(file);
   }, [onImageUploaded]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {

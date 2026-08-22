@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -564,6 +564,7 @@
   transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .oversized-heading {
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: clamp(2.5rem, 6.5vw, 5.5rem);
   line-height: 0.95;
   letter-spacing: -0.04em;
@@ -571,6 +572,7 @@
 }
 .giant-watermark {
   position: absolute;
+  font-family: 'Outfit', sans-serif;
   font-size: clamp(5rem, 15vw, 16rem);
   font-weight: 900;
   letter-spacing: -0.05em;
@@ -578,6 +580,92 @@
   user-select: none;
   pointer-events: none;
   z-index: 0;
+}
+.font-display {
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ═══════════════════════════════════════════════════
+   LUXURY AI CARDS & GLOW EFFECTS
+═══════════════════════════════════════════════════ */
+.glass-panel-luxury {
+  background: rgba(12, 12, 12, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.glass-card-interactive {
+  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8) 0%, rgba(10, 10, 10, 0.95) 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-card-interactive:hover {
+  border-color: rgba(225, 6, 0, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px rgba(225, 6, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.cyber-border-red {
+  position: relative;
+}
+.cyber-border-red::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #E10600, transparent);
+}
+
+.cyber-border-gold {
+  position: relative;
+}
+.cyber-border-gold::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #FFC400, transparent);
+}
+
+/* ═══════════════════════════════════════════════════
+   NODE NETWORK PULSE ANIMATION
+═══════════════════════════════════════════════════ */
+@keyframes dataStream {
+  0% { transform: translateX(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateX(200%); opacity: 0; }
+}
+.data-stream-line {
+  position: absolute;
+  height: 2px;
+  width: 50%;
+  background: linear-gradient(90deg, transparent, #E10600, #FFC400, transparent);
+  animation: dataStream 2.5s ease-in-out infinite;
+}
+
+@keyframes nodeGlowPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 10px rgba(225, 6, 0, 0.4); }
+  50% { transform: scale(1.08); box-shadow: 0 0 25px rgba(225, 6, 0, 0.8), 0 0 40px rgba(255, 196, 0, 0.3); }
+}
+.node-glow-pulse {
+  animation: nodeGlowPulse 2.5s ease-in-out infinite;
+}
+
+@keyframes radarSweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.radar-sweep {
+  animation: radarSweep 6s linear infinite;
+  transform-origin: center;
 }
 
 /* ═══════════════════════════════════════════════════

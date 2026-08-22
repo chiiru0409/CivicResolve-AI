@@ -86,6 +86,8 @@ function mapApiComplaint(raw: Record<string, any>): Complaint {
     longitude:         raw.longitude ?? undefined,
     landmark:          raw.landmark ?? undefined,
     imageUrl:          raw.image_path ?? undefined,
+    evidenceQuality:   raw.evidence_quality ?? (raw.image_path ? 'HIGH / VERIFIED BY PHOTO' : 'LOW — No photo proof provided'),
+    aiAnalysis:        raw.ai_analysis ?? undefined,
     submittedAt:       raw.created_at ?? new Date().toISOString(),
     updatedAt:         raw.updated_at ?? new Date().toISOString(),
     assignedTo:        raw.assigned_officer ?? undefined,

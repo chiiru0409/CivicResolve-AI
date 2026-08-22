@@ -140,16 +140,39 @@ const ReportIssuePage: React.FC = () => {
             </div>
           </div>
 
-          {/* ── Image Upload ──────────────────────────────────────────────── */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
+          {/* ── Image Upload & Evidence Quality ─────────────────────────── */}
+          <div className="card space-y-4">
+            <div className="flex items-center justify-between mb-1">
               <label className="label flex items-center gap-2 mb-0">
-                📸 Upload Evidence Image
-                <span className="text-white/20 font-normal">(Optional)</span>
+                <span>📸 Photo Proof & Evidence Capture</span>
               </label>
               <span className="telemetry-chip">[ 02 · EVIDENCE CAPTURE ]</span>
             </div>
+            
+            <p className="text-xs text-white/50 leading-relaxed font-light">
+              <strong className="text-white font-semibold">Photo proof is required for stronger verification.</strong> Uploading clear photo evidence allows municipal authorities to verify damage severity and dispatch field teams immediately.
+            </p>
+
             <ImageUpload onImageUploaded={handleImageUploaded} />
+
+            {/* Live Evidence Quality Indicator */}
+            {imageUrl ? (
+              <div className="flex items-center gap-2.5 bg-[#22C55E]/10 border border-[#22C55E]/25 rounded-2xl p-3.5 text-xs text-[#22C55E]">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                <div>
+                  <span className="font-bold uppercase tracking-wider block text-[11px]">Evidence: HIGH / VERIFIED BY PHOTO</span>
+                  <span className="text-white/60 text-[11px]">Visual analysis active · High dispatch confidence assigned</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5 bg-[#FFC400]/8 border border-[#FFC400]/20 rounded-2xl p-3.5 text-xs text-[#FFC400]">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-[#FFC400]" />
+                <div>
+                  <span className="font-bold uppercase tracking-wider block text-[11px]">Evidence: LOW — No photo proof provided</span>
+                  <span className="text-white/50 text-[11px]">Reports without visual proof receive lower AI verification score and may require manual inspection.</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Location ─────────────────────────────────────────────────── */}
