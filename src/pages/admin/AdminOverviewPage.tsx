@@ -28,10 +28,34 @@ interface AdminBrief {
   key_bullet_points: string[];
 }
 
+interface AdminOverviewData {
+  total_complaints: number;
+  submitted: number;
+  assigned: number;
+  in_progress: number;
+  inspection: number;
+  resolved: number;
+  pending: number;
+  active_complaints: number;
+  high_priority: number;
+  critical: number;
+  active_incidents: number;
+}
+
 export default function AdminOverviewPage() {
   const { complaints, total, loading, error, refetch } = useAdminComplaints();
+  const [overview, setOverview] = useState<AdminOverviewData | null>(null);
   const [brief, setBrief] = useState<AdminBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
+
+  const fetchOverview = async () => {
+    try {
+      const data = await api.get<AdminOverviewData>('/admin/overview');
+      setOverview(data);
+    } catch (err) {
+      console.warn('Could not load authoritative overview counts:', err);
+    }
+  };
 
   const fetchBrief = async () => {
     setBriefLoading(true);
@@ -46,11 +70,13 @@ export default function AdminOverviewPage() {
   };
 
   useEffect(() => {
+    void fetchOverview();
     void fetchBrief();
   }, []);
 
   const handleRefreshAll = () => {
     void refetch();
+    void fetchOverview();
     void fetchBrief();
   };
 
@@ -143,7 +169,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* ── KPI Telemetry Cards ────────────────────────────────────────── */}
-      {loading && briefLoading ? (
+      {loading && !overview ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} />)}
         </div>
@@ -151,28 +177,28 @@ export default function AdminOverviewPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <DashboardCard
             title="Total Complaints"
-            value={brief?.total_complaints ?? total}
+            value={overview?.total_complaints ?? total}
             subtitle="Database records"
             icon={<ClipboardList className="w-6 h-6" />}
             color="muted"
           />
           <DashboardCard
             title="High Priority"
-            value={brief?.high_priority_count ?? highPriorityCases.length}
+            value={overview?.high_priority ?? highPriorityCases.length}
             subtitle="Urgent field response"
             icon={<AlertTriangle className="w-6 h-6" />}
             color="red"
           />
           <DashboardCard
             title="Pending Actions"
-            value={brief?.pending_count ?? pendingCases.length}
+            value={overview?.pending ?? pendingCases.length}
             subtitle="Active workflows"
             icon={<Clock className="w-6 h-6" />}
             color="yellow"
           />
           <DashboardCard
             title="Resolved"
-            value={brief?.resolved_count ?? complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status)).length}
+            value={overview?.resolved ?? complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status)).length}
             subtitle="Closed out"
             icon={<CheckCircle className="w-6 h-6" />}
             color="green"

@@ -803,8 +803,8 @@ def admin_list_complaints(
         where_clauses, params = [], []
 
         if search and search.strip():
-            s = f"%{search.strip()}%"
-            where_clauses.append("(title LIKE ? OR complaint_number LIKE ? OR location LIKE ? OR description LIKE ?)")
+            s = f"%{search.strip().lower()}%"
+            where_clauses.append("(LOWER(title) LIKE ? OR LOWER(complaint_number) LIKE ? OR LOWER(location) LIKE ? OR LOWER(description) LIKE ?)")
             params.extend([s, s, s, s])
         if category and category.strip() and category.strip().lower() != "all":
             where_clauses.append("LOWER(category) = LOWER(?)")
@@ -816,7 +816,7 @@ def admin_list_complaints(
             where_clauses.append("LOWER(status) = LOWER(?)")
             params.append(status_filter.strip())
         if department and department.strip() and department.strip().lower() != "all":
-            where_clauses.append("department LIKE ?")
+            where_clauses.append("LOWER(department) LIKE LOWER(?)")
             params.append(f"%{department.strip()}%")
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
@@ -974,14 +974,15 @@ def admin_overview(current_user: dict = Depends(require_admin)):
     conn = get_connection()
     try:
         total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
-        submitted = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'Submitted';").fetchone()[0]
-        assigned = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'Assigned';").fetchone()[0]
-        in_progress = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'In Progress';").fetchone()[0]
-        inspection = conn.execute("SELECT COUNT(*) FROM complaints WHERE status = 'Inspection';").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE status IN ('Resolved', 'Closed');").fetchone()[0]
-        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority IN ('HIGH', 'CRITICAL');").fetchone()[0]
-        critical = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority = 'CRITICAL';").fetchone()[0]
-        active_incidents = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed', 'Archived') AND latitude IS NOT NULL AND longitude IS NOT NULL;").fetchone()[0]
+        submitted = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'submitted';").fetchone()[0]
+        assigned = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'assigned';").fetchone()[0]
+        in_progress = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'in progress';").fetchone()[0]
+        inspection = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'inspection';").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved', 'closed');").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived');").fetchone()[0]
+        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) IN ('HIGH', 'CRITICAL');").fetchone()[0]
+        critical = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) = 'CRITICAL';").fetchone()[0]
+        active_incidents = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND latitude IS NOT NULL AND longitude IS NOT NULL AND (latitude != 0 OR longitude != 0);").fetchone()[0]
 
         return {
             "total_complaints": total,
@@ -990,6 +991,8 @@ def admin_overview(current_user: dict = Depends(require_admin)):
             "in_progress": in_progress,
             "inspection": inspection,
             "resolved": resolved,
+            "pending": pending,
+            "active_complaints": pending,
             "high_priority": high_prio,
             "critical": critical,
             "active_incidents": active_incidents,
@@ -1010,10 +1013,10 @@ def get_map_incidents():
     try:
         rows = conn.execute(
             """
-            SELECT id, complaint_number, title, category, priority, status,
-                   latitude, longitude, location, department, evidence_quality, created_at
+            SELECT id, complaint_number, title, description, category, priority, status,
+                   latitude, longitude, location, landmark, department, evidence_quality, created_at
             FROM complaints
-            WHERE status NOT IN ('Resolved', 'Closed', 'Archived')
+            WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived')
               AND latitude IS NOT NULL
               AND longitude IS NOT NULL
               AND (latitude != 0 OR longitude != 0)
@@ -1026,13 +1029,14 @@ def get_map_incidents():
             result.append({
                 "id": d["id"],
                 "complaint_number": d.get("complaint_number") or d["id"],
-                "title": d.get("title") or "Civic Incident",
+                "title": d.get("title") or d.get("description") or "Civic Incident",
+                "description": d.get("description") or "",
                 "category": d.get("category") or "Other",
                 "priority": d.get("priority") or "LOW",
                 "status": d.get("status") or "Submitted",
                 "latitude": float(d["latitude"]),
                 "longitude": float(d["longitude"]),
-                "location": d.get("location") or "",
+                "location": d.get("location") or d.get("landmark") or "",
                 "department": d.get("department") or "",
                 "evidence_quality": d.get("evidence_quality") or "LOW",
                 "created_at": d.get("created_at") or "",
