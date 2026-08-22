@@ -3,14 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, Zap, Loader2, CheckCircle, Edit2,
   Camera, Shield, AlertTriangle, Sparkles, CheckCircle2, AlertOctagon, Clock,
-  FileCheck
+  FileCheck, User, Mail, Phone, RefreshCw, Layers
 } from 'lucide-react';
 import PriorityBadge from '../../components/PriorityBadge';
 import StatusBadge from '../../components/StatusBadge';
 import ComplaintTimeline from '../../components/ComplaintTimeline';
 import ComplaintLocationMap from '../../components/ComplaintLocationMap';
 import { api } from '../../services/api';
-import { mapApiComplaint } from '../../services/complaintService';
+import { mapApiComplaint, adminGetComplaint } from '../../services/complaintService';
 import type { Complaint, ComplaintStatus } from '../../types';
 import { useToast, ToastContainer } from '../../components/Toast';
 import { formatDateTime, getCategoryEmoji } from '../../utils/helpers';
@@ -24,21 +24,26 @@ export default function AdminComplaintDetailPage() {
   const { toasts, addToast, dismissToast } = useToast();
   const [complaint, setComplaint] = useState<Complaint | null>(null);
   const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
   const [updating, setUpdating]   = useState(false);
   const [department, setDepartment] = useState('');
   const [officer, setOfficer]     = useState('');
+  const [team, setTeam]           = useState('');
   const [viewMode, setViewMode]   = useState<'original' | 'ai_overlay'>('ai_overlay');
 
   const loadComplaint = useCallback(async (cid: string) => {
     setLoading(true);
+    setError(null);
     try {
-      const raw = await api.get<Record<string, unknown>>(`/admin/complaints/${cid}`);
-      const c = mapApiComplaint(raw);
+      const c = await adminGetComplaint(cid);
       setComplaint(c);
       setDepartment(c.department ?? '');
-      setOfficer(c.assignedTo ?? '');
+      setOfficer(c.assignedOfficer ?? c.assignedTo ?? '');
+      setTeam(c.assignedTeam ?? '');
     } catch (e) {
-      addToast('Failed to load complaint from server.', 'error');
+      const msg = e instanceof Error ? e.message : 'Failed to load complaint from server.';
+      setError(msg);
+      addToast(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -53,7 +58,7 @@ export default function AdminComplaintDetailPage() {
     if (!id || !complaint) return;
     setUpdating(true);
     try {
-      await api.patch(`/admin/complaints/${id}/status`, {
+      await api.patch(`/admin/complaints/${encodeURIComponent(id)}/status`, {
         status: newStatus,
         message: `Admin status update: ${newStatus}`,
         updated_by: 'admin',
@@ -71,9 +76,10 @@ export default function AdminComplaintDetailPage() {
     if (!id || !department) return;
     setUpdating(true);
     try {
-      await api.post(`/admin/complaints/${id}/assign`, {
+      await api.post(`/admin/complaints/${encodeURIComponent(id)}/assign`, {
         department,
         officer: officer || undefined,
+        team: team || undefined,
         assigned_by: 'admin',
       });
       addToast('Department assignment saved.', 'success');
@@ -85,28 +91,77 @@ export default function AdminComplaintDetailPage() {
     }
   };
 
-  if (loading) return <div className="p-6"><SkeletonCard lines={6} /></div>;
-  if (!complaint) return (
-    <div className="p-6 text-center space-y-4">
-      <p className="text-white/50">Complaint not found in database.</p>
-      <button onClick={() => navigate('/admin/complaints')} className="btn-secondary mx-auto">
-        Back to complaints list
-      </button>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+        <div className="flex items-center gap-3 text-white/50 text-sm">
+          <Loader2 className="w-5 h-5 animate-spin text-[#E10600]" />
+          <span>Loading authoritative incident record from municipal database…</span>
+        </div>
+        <SkeletonCard lines={8} />
+      </div>
+    );
+  }
+
+  if (error || !complaint) {
+    return (
+      <div className="p-6 lg:p-8 space-y-6 max-w-3xl mx-auto text-center">
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <div className="bg-[#111] border border-white/8 rounded-3xl p-8 space-y-4">
+          <AlertTriangle className="w-12 h-12 text-[#FFC400] mx-auto" />
+          <h2 className="text-xl font-bold text-white">
+            {error ? 'Unable to Load Incident Record' : 'Incident Record Not Found'}
+          </h2>
+          <p className="text-sm text-white/50 max-w-md mx-auto">
+            {error || `Complaint "${id}" does not exist in the database or could not be retrieved.`}
+          </p>
+          <div className="flex items-center justify-center gap-3 pt-2">
+            {id && (
+              <button
+                onClick={() => void loadComplaint(id)}
+                className="btn-primary flex items-center gap-2 py-2.5 px-4 text-xs font-bold"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Retry
+              </button>
+            )}
+            <button
+              onClick={() => navigate('/admin/complaints')}
+              className="btn-secondary py-2.5 px-4 text-xs font-bold"
+            >
+              Back to Complaints List
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const hasPhoto = Boolean(complaint.imageUrl && complaint.imageUrl.trim());
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      <button
-        onClick={() => navigate('/admin/complaints')}
-        className="flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors"
-      >
-        <ArrowLeft className="w-4 h-4" /> Back to complaints
-      </button>
+      {/* Navigation Header */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => navigate('/admin/complaints')}
+          className="flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors group"
+        >
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+          <span>Back to incident queue</span>
+        </button>
+
+        <button
+          onClick={() => id && void loadComplaint(id)}
+          disabled={loading || updating}
+          className="flex items-center gap-1.5 text-xs text-white/50 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/8 transition-all"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <span>Reload Details</span>
+        </button>
+      </div>
 
       {/* Header Banner */}
       <div className="relative bg-[#111] border border-white/8 rounded-3xl p-6 sm:p-7 overflow-hidden shadow-2xl">
@@ -117,7 +172,7 @@ export default function AdminComplaintDetailPage() {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <p className="text-xs font-black font-mono text-[#E10600]">{complaint.id}</p>
-                <span className="telemetry-chip">[ LIVE INCIDENT RECORD ]</span>
+                <span className="telemetry-chip">[ AUTHORITATIVE INCIDENT RECORD ]</span>
               </div>
               <h1 className="text-xl sm:text-3xl font-black text-white font-display">{complaint.title}</h1>
               <div className="flex flex-wrap gap-2 mt-2.5 items-center">
@@ -128,16 +183,16 @@ export default function AdminComplaintDetailPage() {
                     ? 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/25'
                     : 'bg-[#FFC400]/10 text-[#FFC400] border-[#FFC400]/25'
                 }`}>
-                  {hasPhoto ? '✓ Photo Verified' : '⚠️ No Photo Proof'}
+                  {hasPhoto ? '✓ Photo Evidence Verified' : '⚠️ No Photo Proof'}
                 </span>
                 {complaint.source && (
                   <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-white/5 text-white/50 border-white/10 font-mono">
                     {complaint.source === 'AI Call' ? '📞 AI Call' : '🌐 Web'}
                   </span>
                 )}
-                {complaint.inspectionRequired && (
-                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-[#E10600]/10 text-[#E10600] border-[#E10600]/30 font-mono">
-                    🔍 Site Inspection Required
+                {complaint.severity && (
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-white/5 text-white/70 border-white/10 font-mono">
+                    Severity: {complaint.severity}/10
                   </span>
                 )}
               </div>
@@ -162,6 +217,46 @@ export default function AdminComplaintDetailPage() {
         
         {/* Left Column */}
         <div className="lg:col-span-7 space-y-6">
+
+          {/* Citizen Reporter Card */}
+          <div className="bg-[#111] border border-white/8 rounded-3xl p-6 space-y-3">
+            <div className="flex items-center justify-between border-b border-white/8 pb-3">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-[#FFC400]" />
+                <h3 className="font-bold text-white text-sm">Citizen Reporter Details</h3>
+              </div>
+              <span className="text-[10px] font-mono uppercase text-white/40">
+                Citizen ID: #{complaint.citizenId ?? 'Guest/Web'}
+              </span>
+            </div>
+
+            {complaint.isAnonymous ? (
+              <div className="p-3 bg-white/5 rounded-xl border border-white/8 text-xs text-white/60">
+                🔒 Anonymous Submission — Identity protected by municipal whistleblowing policy.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-white/4 p-3 rounded-xl">
+                  <span className="text-[10px] font-mono text-white/40 uppercase block">Name</span>
+                  <span className="text-xs font-semibold text-white mt-0.5 block truncate">
+                    {complaint.citizenName || 'Registered Citizen'}
+                  </span>
+                </div>
+                <div className="bg-white/4 p-3 rounded-xl">
+                  <span className="text-[10px] font-mono text-white/40 uppercase block">Email</span>
+                  <span className="text-xs font-semibold text-white/80 mt-0.5 block truncate">
+                    {complaint.citizenEmail || 'Not specified'}
+                  </span>
+                </div>
+                <div className="bg-white/4 p-3 rounded-xl">
+                  <span className="text-[10px] font-mono text-white/40 uppercase block">Contact Mode</span>
+                  <span className="text-xs font-semibold text-[#22C55E] mt-0.5 block capitalize">
+                    {complaint.contactPreference || 'Email'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Photo Proof & AI Vision Analysis Section */}
           <div className="glass-panel-luxury p-6 rounded-3xl space-y-4 cyber-border-red">
@@ -276,7 +371,7 @@ export default function AdminComplaintDetailPage() {
                 </div>
                 <div className="bg-white/4 p-2 rounded-xl">
                   <span className="text-[10px] font-mono text-white/40 uppercase block">DEPARTMENT</span>
-                  <span className="text-xs font-bold text-white mt-0.5 truncate block">{complaint.department}</span>
+                  <span className="text-xs font-bold text-white mt-0.5 truncate block">{complaint.department || 'Roads'}</span>
                 </div>
                 <div className="bg-white/4 p-2 rounded-xl">
                   <span className="text-[10px] font-mono text-white/40 uppercase block">LOCATION RISK</span>
@@ -355,14 +450,14 @@ export default function AdminComplaintDetailPage() {
               )}
               {complaint.latitude && (
                 <div className="text-xs font-mono text-white/40 pl-6">
-                  GPS: {complaint.latitude.toFixed(6)}, {complaint.longitude?.toFixed(6)}
+                  GPS Coordinates: {complaint.latitude.toFixed(6)}, {complaint.longitude?.toFixed(6)}
                 </div>
               )}
               <div className="flex items-start gap-2">
                 <Building2 className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
                 <span className="text-white/80">{complaint.department}</span>
               </div>
-              <p className="text-xs text-white/40 pl-6">Logged: {formatDateTime(complaint.submittedAt)}</p>
+              <p className="text-xs text-white/40 pl-6">Logged in Database: {formatDateTime(complaint.submittedAt)}</p>
             </div>
           </div>
 
@@ -371,7 +466,7 @@ export default function AdminComplaintDetailPage() {
             <h2 className="font-black text-white flex items-center gap-2 font-display">
               <Edit2 className="w-4 h-4 text-[#E10600]" /> Authority Assignment
             </h2>
-            <div className="grid sm:grid-cols-2 gap-3">
+            <div className="grid sm:grid-cols-3 gap-3">
               <div>
                 <label className="label">Department</label>
                 <input
@@ -382,11 +477,20 @@ export default function AdminComplaintDetailPage() {
                 />
               </div>
               <div>
-                <label className="label">Officer / Team</label>
+                <label className="label">Officer</label>
                 <input
                   value={officer}
                   onChange={(e) => setOfficer(e.target.value)}
-                  placeholder="Officer or Team name"
+                  placeholder="Officer name"
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="label">Team / Unit</label>
+                <input
+                  value={team}
+                  onChange={(e) => setTeam(e.target.value)}
+                  placeholder="Team or Unit"
                   className="input-field"
                 />
               </div>

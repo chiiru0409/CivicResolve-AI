@@ -50,10 +50,13 @@ export function mapApiComplaint(raw: Record<string, any>): Complaint {
 
   return {
     id:                 String(raw.complaint_number ?? raw.id),
+    complaintNumber:    String(raw.complaint_number ?? raw.id),
     title:              String(raw.title ?? ''),
     description:        String(raw.description ?? ''),
     category:           raw.category ?? 'Other',
+    subcategory:        (raw.subcategory as string) || undefined,
     priority:           raw.priority ?? 'LOW',
+    severity:           raw.severity != null ? Number(raw.severity) : undefined,
     status:             raw.status ?? 'Submitted',
     department:         String(raw.department ?? ''),
     location:           String(raw.location ?? ''),
@@ -66,6 +69,8 @@ export function mapApiComplaint(raw: Record<string, any>): Complaint {
     submittedAt:        String(raw.created_at ?? new Date().toISOString()),
     updatedAt:          String(raw.updated_at ?? new Date().toISOString()),
     assignedTo:         (raw.assigned_officer as string) || (raw.assigned_team as string) || undefined,
+    assignedOfficer:    (raw.assigned_officer as string) || undefined,
+    assignedTeam:       (raw.assigned_team as string) || undefined,
     estimatedResponse:  (raw.estimated_response as string) || undefined,
     timeline,
     aiConfidence:       raw.ai_confidence != null ? Number(raw.ai_confidence) : undefined,
@@ -79,6 +84,13 @@ export function mapApiComplaint(raw: Record<string, any>): Complaint {
     isAnonymous:        Boolean(raw.is_anonymous),
     contactPreference:  String(raw.contact_preference ?? 'email'),
     source:             (raw.source as string) ?? (raw.contact_preference === 'voice' ? 'AI Call' : 'Web'),
+    citizenId:          raw.citizen_id != null ? Number(raw.citizen_id) : undefined,
+    citizenName:        (raw.citizen_name as string) || undefined,
+    citizenEmail:       (raw.citizen_email as string) || undefined,
+    citizenPhone:       (raw.citizen_phone as string) || undefined,
+    resolutionNotes:    (raw.resolution_notes as string) || undefined,
+    resolvedAt:         (raw.resolved_at as string) || undefined,
+    resolutionProofUrl: (raw.resolution_proof_url as string) || undefined,
   };
 }
 

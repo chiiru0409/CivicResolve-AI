@@ -62,10 +62,13 @@ export interface TimelineEvent {
 
 export interface Complaint {
   id: string;
+  complaintNumber?: string;
   title: string;
   description: string;
   category: Category;
+  subcategory?: string;
   priority: Priority;
+  severity?: number;
   status: ComplaintStatus;
   department: string;
   location: string;
@@ -78,6 +81,8 @@ export interface Complaint {
   submittedAt: string;
   updatedAt: string;
   assignedTo?: string;
+  assignedOfficer?: string;
+  assignedTeam?: string;
   estimatedResponse?: string;
   timeline: TimelineEvent[];
   aiConfidence?: number;
@@ -91,6 +96,13 @@ export interface Complaint {
   escalationLevel?: number;
   zone?: string;
   source?: 'Web' | 'AI Call' | string;
+  citizenId?: number;
+  citizenName?: string;
+  citizenEmail?: string;
+  citizenPhone?: string;
+  resolutionNotes?: string;
+  resolvedAt?: string;
+  resolutionProofUrl?: string;
 }
 
 // ---- AI Analysis ------------------------------------------------

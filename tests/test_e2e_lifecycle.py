@@ -271,6 +271,28 @@ def run_tests():
     assert adm_v_comps.status_code == 200
     assert any(c["id"] == v_cid for c in adm_v_comps.json()["items"])
 
+    # ── Admin Complaint Detail Endpoint Deep Verification (Phase 18) ────────
+    adm_detail_res = client.get(f"/admin/complaints/{v_cid}", headers={"Authorization": f"Bearer {adm_v_token}"})
+    assert adm_detail_res.status_code == 200, f"Detail endpoint failed: {adm_detail_res.text}"
+    detail_data = adm_detail_res.json()
+    assert detail_data["id"] == v_cid
+    assert detail_data["title"] == "Large pothole near main road"
+    assert detail_data["category"] == "Roads"
+    assert detail_data["priority"] in ("HIGH", "LOW", "MEDIUM", "CRITICAL")
+    assert detail_data["status"] == "Submitted"
+    assert detail_data["citizen_id"] == v_uid
+    assert detail_data["citizen_name"] == "Vamsi"
+    assert detail_data["citizen_email"] == vamsi_email
+    assert detail_data["latitude"] == 17.4325
+    assert detail_data["longitude"] == 78.4071
+    assert "updates" in detail_data and len(detail_data["updates"]) >= 1
+    assert "assignments" in detail_data
+
+    # Repeated non-destructive read check
+    adm_detail_res2 = client.get(f"/admin/complaints/{v_cid}", headers={"Authorization": f"Bearer {adm_v_token}"})
+    assert adm_detail_res2.status_code == 200
+    assert adm_detail_res2.json()["status"] == "Submitted"
+
     adm_v_ov = client.get("/admin/overview", headers={"Authorization": f"Bearer {adm_v_token}"})
     assert adm_v_ov.status_code == 200
     assert adm_v_ov.json()["total_complaints"] >= 1
@@ -279,6 +301,7 @@ def run_tests():
     assert adm_v_map.status_code == 200
     assert any(m["id"] == v_cid for m in adm_v_map.json())
     print(f"[PASS] Vamsi Account Lifecycle & Admin Retention: 100% Verified (Complaint ID: {v_cid})")
+    print(f"[PASS] Admin Complaint Detail Full Data & Non-Destructive Read: 100% Verified (Citizen: {detail_data['citizen_name']})")
 
     print("\n=================================================================")
     print("   ALL EXACT USER FLOW REPRODUCTION TESTS PASSED WITH 100% SUCCESS")

@@ -189,7 +189,7 @@ def _fetch_assignments(conn, complaint_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _row_to_complaint_out(row: dict, updates: list, assignments: list) -> dict:
+def _row_to_complaint_out(row: dict, updates: list, assignments: list, citizen: Optional[dict] = None) -> dict:
     d = dict(row)
     # Parse ai_analysis JSON string
     if d.get("ai_analysis") and isinstance(d["ai_analysis"], str):
@@ -203,6 +203,10 @@ def _row_to_complaint_out(row: dict, updates: list, assignments: list) -> dict:
     )
     d["updates"] = updates
     d["assignments"] = assignments
+    if citizen:
+        d["citizen_name"] = citizen.get("full_name")
+        d["citizen_email"] = citizen.get("email")
+        d["citizen_phone"] = citizen.get("phone")
     return d
 
 
@@ -835,7 +839,12 @@ def admin_list_complaints(
             real_id = r["id"]
             updates = _fetch_updates(conn, real_id)
             assignments = _fetch_assignments(conn, real_id)
-            items.append(_row_to_complaint_out(dict(r), updates, assignments))
+            citizen = None
+            if r["citizen_id"]:
+                u_row = conn.execute("SELECT id, full_name, email, phone FROM users WHERE id = ?;", (r["citizen_id"],)).fetchone()
+                if u_row:
+                    citizen = dict(u_row)
+            items.append(_row_to_complaint_out(dict(r), updates, assignments, citizen))
 
         return {"total": total, "items": items}
     finally:
@@ -853,7 +862,12 @@ def admin_get_complaint(complaint_id: str, current_user: dict = Depends(require_
         real_id = d["id"]
         updates     = _fetch_updates(conn, real_id)
         assignments = _fetch_assignments(conn, real_id)
-        return _row_to_complaint_out(d, updates, assignments)
+        citizen = None
+        if d.get("citizen_id"):
+            u_row = conn.execute("SELECT id, full_name, email, phone FROM users WHERE id = ?;", (d["citizen_id"],)).fetchone()
+            if u_row:
+                citizen = dict(u_row)
+        return _row_to_complaint_out(d, updates, assignments, citizen)
     finally:
         conn.close()
 
