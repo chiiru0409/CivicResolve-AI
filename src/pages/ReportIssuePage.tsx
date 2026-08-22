@@ -153,7 +153,7 @@ const ReportIssuePage: React.FC = () => {
               <strong className="text-white font-semibold">Photo proof is required for stronger verification.</strong> Uploading clear photo evidence allows municipal authorities to verify damage severity and dispatch field teams immediately.
             </p>
 
-            <ImageUpload onImageUploaded={handleImageUploaded} />
+            <ImageUpload description={description} onImageUploaded={handleImageUploaded} />
 
             {/* Live Evidence Quality Indicator */}
             {imageUrl ? (

@@ -4,10 +4,11 @@ import { analyzeImage } from '../services/aiService';
 import type { ImageAnalysis } from '../types';
 
 interface ImageUploadProps {
+  description?: string;
   onImageUploaded: (file: File, url: string, analysis?: ImageAnalysis) => void;
 }
 
-const ImageUpload: React.FC<ImageUploadProps> = ({ onImageUploaded }) => {
+const ImageUpload: React.FC<ImageUploadProps> = ({ description, onImageUploaded }) => {
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -24,7 +25,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageUploaded }) => {
       setAnalyzing(true);
       setAnalysis(null);
       try {
-        const result = await analyzeImage(file);
+        const result = await analyzeImage(file, description);
         setAnalysis(result);
         onImageUploaded(file, dataUrl, result);
       } finally {
@@ -32,7 +33,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageUploaded }) => {
       }
     };
     reader.readAsDataURL(file);
-  }, [onImageUploaded]);
+  }, [description, onImageUploaded]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();

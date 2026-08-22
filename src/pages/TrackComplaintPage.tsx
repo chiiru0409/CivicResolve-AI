@@ -13,8 +13,6 @@ import type { Complaint } from '../types';
 import { formatDate, getCategoryEmoji } from '../utils/helpers';
 import { useToast, ToastContainer } from '../components/Toast';
 
-const DEMO_IDS = ['CR-2026-004821', 'CR-2026-004712', 'CR-2026-004715', 'CR-2026-004820'];
-
 const TrackComplaintPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { toasts, addToast, dismissToast } = useToast();
@@ -104,22 +102,6 @@ const TrackComplaintPage: React.FC = () => {
                 }
                 Track
               </button>
-            </div>
-
-            {/* Demo IDs */}
-            <div className="mt-3">
-              <p className="text-xs text-white/30 mb-2">Demo IDs to try:</p>
-              <div className="flex flex-wrap gap-2">
-                {DEMO_IDS.map((id) => (
-                  <button
-                    key={id}
-                    onClick={() => { setInputId(id); void doSearch(id); }}
-                    className="text-xs bg-white/5 hover:bg-white/10 border border-white/8 text-white/40 hover:text-white px-3 py-1 rounded-full font-mono transition-all"
-                  >
-                    {id}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
 

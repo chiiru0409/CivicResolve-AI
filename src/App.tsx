@@ -4,7 +4,6 @@ import { AuthProvider } from './context/AuthContext';
 import { CitizenRoute } from './components/ProtectedRoute';
 import Navbar from './components/Navbar';
 import AIChat from './components/AIChat';
-import DemoBanner from './components/DemoBanner';
 import EagleEyeLogo from './components/EagleEyeLogo';
 
 // ── Citizen pages ───────────────────────────────────────────
@@ -57,7 +56,6 @@ function AppShell() {
 
   return (
     <>
-      {!isAdmin && <DemoBanner />}
       {!isAdmin && <Navbar />}
 
       <main id="main-content">

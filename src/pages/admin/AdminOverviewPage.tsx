@@ -127,7 +127,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* ── KPI Telemetry Cards ────────────────────────────────────────── */}
-      {loading ? (
+      {loading && briefLoading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} />)}
         </div>
@@ -135,28 +135,28 @@ export default function AdminOverviewPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <DashboardCard
             title="Total Complaints"
-            value={total}
+            value={brief?.total_complaints ?? total}
             subtitle="Database records"
             icon={<ClipboardList className="w-6 h-6" />}
             color="muted"
           />
           <DashboardCard
             title="High Priority"
-            value={highPriorityCases.length}
+            value={brief?.high_priority_count ?? highPriorityCases.length}
             subtitle="Urgent field response"
             icon={<AlertTriangle className="w-6 h-6" />}
             color="red"
           />
           <DashboardCard
             title="Pending Actions"
-            value={pendingCases.length}
+            value={brief?.pending_count ?? pendingCases.length}
             subtitle="Active workflows"
             icon={<Clock className="w-6 h-6" />}
             color="yellow"
           />
           <DashboardCard
             title="Resolved"
-            value={complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status)).length}
+            value={brief?.resolved_count ?? complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status)).length}
             subtitle="Closed out"
             icon={<CheckCircle className="w-6 h-6" />}
             color="green"

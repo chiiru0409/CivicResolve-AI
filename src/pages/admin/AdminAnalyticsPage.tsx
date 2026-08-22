@@ -94,24 +94,34 @@ export default function AdminAnalyticsPage() {
         <div className="h-px w-full bg-gradient-to-r from-transparent via-[#FFC400]/40 to-transparent mb-5" />
         <div className="flex items-center gap-3 mb-5">
           <Brain className="w-5 h-5 text-[#FFC400]" />
-          <h2 className="font-black text-white">AI Pattern Detection</h2>
+          <h2 className="font-black text-white">AI Pattern Detection & Anomaly Clusters</h2>
         </div>
         <div className="space-y-4">
-          {summary.recurringIssues.map((issue, i) => (
-            <div key={i} className="bg-white/5 border border-white/8 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="bg-[#E10600]/10 text-[#E10600] text-xs font-bold px-2.5 py-1 rounded-full border border-[#E10600]/20">
-                  {issue.count} complaints
-                </span>
-                <span className="text-xs text-white/40">in last {issue.days} days</span>
+          {summary.byCategory.filter((c) => c.count > 0).length > 0 ? (
+            summary.byCategory.filter((c) => c.count > 0).map((issue, i) => (
+              <div key={i} className="bg-white/5 border border-white/8 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="bg-[#E10600]/10 text-[#E10600] text-xs font-bold px-2.5 py-1 rounded-full border border-[#E10600]/20">
+                    {issue.count} {issue.count === 1 ? 'case' : 'cases'} logged
+                  </span>
+                  <span className="text-xs text-white/40">Category: {issue.category}</span>
+                </div>
+                <p className="font-bold text-white mb-2">Active {issue.category} Workload Cluster</p>
+                <div className="flex items-start gap-2 bg-[#FFC400]/5 border border-[#FFC400]/15 rounded-xl p-3">
+                  <Zap className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-white/60">
+                    {issue.count > 2
+                      ? `Elevated incident volume in ${issue.category}. Recommend proactive field crew dispatch and preventative corridor review.`
+                      : `Standard maintenance queue for ${issue.category}. Service delivery operating within standard SLA.`}
+                  </p>
+                </div>
               </div>
-              <p className="font-bold text-white mb-2">{issue.area} · {issue.category}</p>
-              <div className="flex items-start gap-2 bg-[#FFC400]/5 border border-[#FFC400]/15 rounded-xl p-3">
-                <Zap className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-white/60">{issue.recommendation}</p>
-              </div>
+            ))
+          ) : (
+            <div className="bg-white/3 border border-white/8 rounded-xl p-8 text-center text-white/40 text-xs">
+              No complaint patterns detected yet. All municipal departments operating at nominal capacity.
             </div>
-          ))}
+          )}
         </div>
       </div>
 

@@ -13,7 +13,7 @@ import { api } from '../../services/api';
 
 const CATS = ['All', 'Roads', 'Garbage', 'Drainage', 'Water', 'Streetlights', 'Infrastructure', 'Other'];
 const PRIS = ['All', 'HIGH', 'MEDIUM', 'LOW'];
-const STATS = ['All', 'Submitted', 'Routed', 'Assigned', 'In Progress', 'Resolved', 'Escalated'];
+const STATS = ['All', 'Submitted', 'AI_Analysis', 'Routed', 'Assigned', 'In Progress', 'Inspection', 'Resolved', 'Closed', 'Escalated'];
 
 interface AIAnalysis {
   complaint_id: string;

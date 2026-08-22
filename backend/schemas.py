@@ -196,6 +196,10 @@ class ComplaintOut(BaseModel):
     ai_analysis: Optional[Any]
     ai_confidence: Optional[int]
     ai_reason: Optional[str]
+    public_safety_impact: Optional[str] = None
+    inspection_required: Optional[int] = 0
+    location_risk: Optional[str] = None
+    action_plan: Optional[str] = None
     assigned_officer: Optional[str]
     assigned_team: Optional[str]
     estimated_response: Optional[str]
@@ -398,3 +402,56 @@ class VoiceTurnResponse(BaseModel):
     extracted_data: dict[str, Any]
     action: str = Field("speak", description="'speak', 'listen', 'confirm', 'completed', 'ended'")
     complaint: Optional[dict] = None
+
+
+class ImageAnalysisRequest(BaseModel):
+    description: Optional[str] = None
+    filename: Optional[str] = None
+    image_data: Optional[str] = None
+
+
+class ImageAnalysisResponse(BaseModel):
+    detected_objects: list[str]
+    severity: str
+    suggested_category: str
+    confidence: int
+    summary: str
+
+
+# ══════════════════════════════════════════════════════════════
+# DUPLICATE DETECTION & MAP INCIDENTS SCHEMAS
+# ══════════════════════════════════════════════════════════════
+
+class DuplicateCheckRequest(BaseModel):
+    description: str = Field(..., min_length=5, max_length=4000)
+    category: Optional[str] = None
+    location: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+class DuplicateCheckResult(BaseModel):
+    is_potential_duplicate: bool
+    similarity_percentage: int
+    existing_complaint_id: Optional[str] = None
+    existing_title: Optional[str] = None
+    existing_status: Optional[str] = None
+    existing_created_at: Optional[str] = None
+    existing_location: Optional[str] = None
+    explanation: str
+
+
+class MapIncident(BaseModel):
+    id: str
+    complaint_number: str
+    title: str
+    category: str
+    priority: str
+    status: str
+    latitude: float
+    longitude: float
+    location: Optional[str] = None
+    department: Optional[str] = None
+    created_at: str
+
+

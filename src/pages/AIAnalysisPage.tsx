@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle, Loader2, ArrowRight, Edit3,
-  AlertCircle, MapPin, Building2, Zap
+  AlertCircle, MapPin, Building2, Zap, AlertTriangle, ShieldCheck
 } from 'lucide-react';
 import { analyzeComplaint } from '../services/aiService';
-import { submitComplaint } from '../services/complaintService';
+import { submitComplaint, checkDuplicateComplaint } from '../services/complaintService';
 import PriorityBadge from '../components/PriorityBadge';
 import type { AIAnalysis } from '../types';
 
@@ -15,17 +15,26 @@ interface Step { label: string; done: boolean; active: boolean }
 const INITIAL_STEPS: Step[] = [
   { label: 'Understanding complaint description', done: false, active: false },
   { label: 'Analyzing image evidence',            done: false, active: false },
-  { label: 'Identifying issue location',          done: false, active: false },
-  { label: 'Classifying issue category',          done: false, active: false },
-  { label: 'Determining severity and priority',   done: false, active: false },
-  { label: 'Finding responsible authority',       done: false, active: false },
+  { label: 'Identifying issue location & GPS',    done: false, active: false },
+  { label: 'Cross-referencing duplicate complaints', done: false, active: false },
+  { label: 'Classifying issue category & hazard', done: false, active: false },
+  { label: 'Finding responsible municipal authority', done: false, active: false },
 ];
+
+interface DuplicateInfo {
+  is_potential_duplicate: boolean;
+  similarity_percentage: number;
+  existing_complaint_id?: string;
+  existing_title?: string;
+  explanation?: string;
+}
 
 const AIAnalysisPage: React.FC = () => {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<'processing' | 'result' | 'error'>('processing');
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS);
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
   const [pendingData, setPendingData] = useState<Record<string, string> | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -38,17 +47,30 @@ const AIAnalysisPage: React.FC = () => {
   }, []);
 
   const runAnalysis = async (data: Record<string, string>) => {
-    const stepDelays = [600, 1200, 1800, 2400, 3000, 3500];
+    const stepDelays = [400, 800, 1200, 1600, 2000, 2400];
     stepDelays.forEach((d, idx) => {
       setTimeout(() => {
         setSteps((prev) => prev.map((s, i) => ({ ...s, done: i < idx, active: i === idx })));
       }, d);
     });
+
     try {
-      const result = await analyzeComplaint(data.description, data.location, data.imageUrl);
-      await new Promise((r) => setTimeout(r, 500));
+      const [aiRes, dupRes] = await Promise.all([
+        analyzeComplaint(data.description, data.location, data.imageUrl),
+        checkDuplicateComplaint({
+          description: data.description,
+          location: data.location,
+          latitude: data.latitude ? parseFloat(data.latitude) : undefined,
+          longitude: data.longitude ? parseFloat(data.longitude) : undefined,
+        }).catch(() => null),
+      ]);
+
+      await new Promise((r) => setTimeout(r, 400));
       setSteps((prev) => prev.map((s) => ({ ...s, done: true, active: false })));
-      setAnalysis(result);
+      setAnalysis(aiRes);
+      if (dupRes && dupRes.is_potential_duplicate) {
+        setDuplicateInfo(dupRes);
+      }
       setPhase('result');
     } catch {
       setPhase('error');
@@ -80,7 +102,6 @@ const AIAnalysisPage: React.FC = () => {
         assigned_team:      analysis.assignedTeam,
       });
       sessionStorage.removeItem('pendingComplaint');
-      await new Promise((r) => setTimeout(r, 400));
       navigate(`/success/${complaint.id}`);
     } catch {
       setPhase('error');
@@ -91,31 +112,30 @@ const AIAnalysisPage: React.FC = () => {
 
   // ── Processing ───────────────────────────────────────────────
   if (phase === 'processing') {
-    const activeIdx = steps.findIndex((s) => s.active);
     const progress = steps.filter((s) => s.done).length;
 
     return (
-      <div className="min-h-screen bg-civic-black pt-20 flex items-center justify-center">
+      <div className="min-h-screen bg-[#070707] pt-20 flex items-center justify-center">
         <div className="max-w-md w-full mx-auto px-4">
           <div className="card text-center">
             {/* AI processing icon */}
             <div className="relative w-16 h-16 mx-auto mb-5">
-              <div className="w-16 h-16 bg-civic-elevated border border-civic-red/30 rounded-2xl flex items-center justify-center">
-                <Zap className="w-8 h-8 text-civic-red animate-pulse" />
+              <div className="w-16 h-16 bg-white/5 border border-[#E10600]/30 rounded-2xl flex items-center justify-center">
+                <Zap className="w-8 h-8 text-[#E10600] animate-pulse" />
               </div>
             </div>
 
-            <h2 className="text-2xl font-black text-civic-text mb-1">
-              <span className="text-civic-text">CIVIC</span>
-              <span className="text-civic-red">RESOLVE</span>
-              <span className="text-civic-yellow text-lg"> AI</span>
+            <h2 className="text-2xl font-black text-white mb-1 font-display">
+              <span>CIVIC</span>
+              <span className="text-[#E10600]">RESOLVE</span>
+              <span className="text-[#FFC400] text-lg"> AI</span>
             </h2>
-            <p className="text-civic-muted mb-2">Analyzing your complaint...</p>
+            <p className="text-white/50 mb-2 text-sm">Synthesizing intelligence & routing telemetry…</p>
 
             {/* Progress bar */}
-            <div className="w-full bg-civic-elevated rounded-full h-1.5 mb-6 overflow-hidden">
+            <div className="w-full bg-white/10 rounded-full h-1.5 mb-6 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-civic-red to-civic-yellow rounded-full transition-all duration-500"
+                className="h-full bg-gradient-to-r from-[#E10600] to-[#FFC400] rounded-full transition-all duration-500"
                 style={{ width: `${(progress / steps.length) * 100}%` }}
               />
             </div>
@@ -127,29 +147,29 @@ const AIAnalysisPage: React.FC = () => {
                   key={i}
                   className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-300 ${
                     step.done
-                      ? 'bg-civic-red/5 border border-civic-red/20'
+                      ? 'bg-[#E10600]/5 border border-[#E10600]/20'
                       : step.active
-                      ? 'bg-civic-yellow/5 border border-civic-yellow/30'
-                      : 'bg-civic-elevated border border-civic-border opacity-40'
+                      ? 'bg-[#FFC400]/5 border border-[#FFC400]/30'
+                      : 'bg-white/3 border border-white/6 opacity-40'
                   }`}
                 >
                   <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center">
                     {step.done ? (
-                      <CheckCircle className="w-5 h-5 text-civic-red" />
+                      <CheckCircle className="w-5 h-5 text-[#E10600]" />
                     ) : step.active ? (
-                      <Loader2 className="w-5 h-5 text-civic-yellow animate-spin" />
+                      <Loader2 className="w-5 h-5 text-[#FFC400] animate-spin" />
                     ) : (
-                      <div className="w-2 h-2 rounded-full bg-civic-border" />
+                      <div className="w-2 h-2 rounded-full bg-white/20" />
                     )}
                   </div>
                   <span className={`text-sm font-medium ${
-                    step.done ? 'text-civic-red' : step.active ? 'text-civic-yellow' : 'text-civic-border'
+                    step.done ? 'text-[#E10600]' : step.active ? 'text-[#FFC400]' : 'text-white/30'
                   }`}>
                     {step.label}
                   </span>
                   {step.active && (
-                    <span className="ml-auto text-[10px] bg-civic-yellow/10 text-civic-yellow px-2 py-0.5 rounded-full border border-civic-yellow/30 font-bold animate-pulse">
-                      PROCESSING
+                    <span className="ml-auto text-[10px] bg-[#FFC400]/10 text-[#FFC400] px-2 py-0.5 rounded-full border border-[#FFC400]/30 font-bold animate-pulse font-mono">
+                      ANALYZING
                     </span>
                   )}
                 </div>
@@ -164,12 +184,12 @@ const AIAnalysisPage: React.FC = () => {
   // ── Error ────────────────────────────────────────────────────
   if (phase === 'error') {
     return (
-      <div className="min-h-screen bg-civic-black pt-20 flex items-center justify-center">
+      <div className="min-h-screen bg-[#070707] pt-20 flex items-center justify-center">
         <div className="max-w-md w-full mx-auto px-4 text-center">
           <div className="card">
-            <AlertCircle className="w-12 h-12 text-civic-red mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-civic-text mb-2">Analysis Failed</h2>
-            <p className="text-civic-muted mb-6">There was an error analyzing your complaint. Please try again.</p>
+            <AlertCircle className="w-12 h-12 text-[#E10600] mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-white mb-2">Analysis Failed</h2>
+            <p className="text-white/50 mb-6">There was an error analyzing your complaint. Please verify your connection and try again.</p>
             <button onClick={() => navigate('/report')} className="btn-primary justify-center w-full">
               Try Again
             </button>
@@ -181,52 +201,62 @@ const AIAnalysisPage: React.FC = () => {
 
   // ── Analysis Result ──────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-civic-black pt-20 pb-12">
+    <div className="min-h-screen bg-[#070707] pt-20 pb-12">
       <div className="max-w-2xl mx-auto px-4 sm:px-6">
 
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 bg-civic-success/10 border border-civic-success/30 text-civic-success text-sm font-bold px-4 py-2 rounded-full mb-4">
+          <div className="inline-flex items-center gap-2 bg-[#22C55E]/10 border border-[#22C55E]/30 text-[#22C55E] text-sm font-bold px-4 py-2 rounded-full mb-4">
             <CheckCircle className="w-4 h-4" />
             AI Analysis Complete
           </div>
-          <h1 className="text-3xl font-black text-civic-text">Intelligence Report</h1>
-          <p className="text-civic-muted mt-2">Review the AI findings and confirm to submit</p>
+          <h1 className="text-3xl font-black text-white font-display">Intelligence Report</h1>
+          <p className="text-white/50 mt-2">Review the AI findings and confirm to submit</p>
         </div>
+
+        {duplicateInfo && (
+          <div className="bg-[#FFC400]/10 border border-[#FFC400]/30 rounded-2xl p-4 mb-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-[#FFC400] flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-[#FFC400]">Potential Duplicate Incident Detected</p>
+              <p className="text-xs text-white/80 mt-1 leading-relaxed">{duplicateInfo.explanation}</p>
+              <p className="text-[11px] text-white/50 mt-1">You may still proceed with submission if this represents a new recurrence or separate location.</p>
+            </div>
+          </div>
+        )}
 
         {analysis && (
           <div className="space-y-4">
-            {/* AI Intelligence Card with Dynamic Telemetry Header */}
-            <div className="relative bg-civic-surface border border-civic-red/30 rounded-2xl p-6 overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-civic-red to-transparent" />
-              <div className="absolute inset-0 speed-lines-bg opacity-20" />
+            {/* AI Intelligence Card */}
+            <div className="relative bg-[#111] border border-[#E10600]/30 rounded-2xl p-6 overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600] to-transparent" />
               <div className="relative">
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-civic-red/10 border border-civic-red/30 rounded-xl flex items-center justify-center">
-                      <Zap className="w-5 h-5 text-civic-red" />
+                    <div className="w-10 h-10 bg-[#E10600]/10 border border-[#E10600]/30 rounded-xl flex items-center justify-center">
+                      <Zap className="w-5 h-5 text-[#E10600]" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="font-black text-civic-text text-sm">AI INTELLIGENCE REPORT</p>
+                        <p className="font-black text-white text-sm font-display">AI INTELLIGENCE REPORT</p>
                         <span className="telemetry-chip-green">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
                           VERIFIED
                         </span>
                       </div>
-                      <p className="text-civic-muted text-xs font-mono">MODEL: LOCAL LLM · LATENCY: 340ms</p>
+                      <p className="text-white/40 text-xs font-mono">AUTONOMOUS MUNICIPAL CLASSIFICATION</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 bg-civic-yellow/10 border border-civic-yellow/30 px-3 py-1.5 rounded-xl">
-                    <span className="text-base font-black font-mono text-civic-yellow">{analysis.confidence}%</span>
-                    <span className="text-[10px] font-mono text-civic-yellow uppercase font-bold">CONFIDENCE</span>
+                  <div className="flex items-center gap-1.5 bg-[#FFC400]/10 border border-[#FFC400]/30 px-3 py-1.5 rounded-xl">
+                    <span className="text-base font-black font-mono text-[#FFC400]">{analysis.confidence}%</span>
+                    <span className="text-[10px] font-mono text-[#FFC400] uppercase font-bold">CONFIDENCE</span>
                   </div>
                 </div>
 
-                <h3 className="text-lg font-bold text-civic-text mb-2">{analysis.title}</h3>
+                <h3 className="text-lg font-bold text-white mb-2">{analysis.title}</h3>
 
                 {/* Reasoning stream */}
-                <div className="bg-[#111] border border-white/8 rounded-xl p-3.5 mt-3">
+                <div className="bg-[#181818] border border-white/8 rounded-xl p-3.5 mt-3">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-[10px] font-mono uppercase text-white/40">AI Context Reasoning</span>
                     <span className="text-[10px] font-mono text-[#FFC400]">AUTONOMOUS DISPATCH</span>
@@ -241,47 +271,47 @@ const AIAnalysisPage: React.FC = () => {
             {/* Details grid */}
             <div className="grid grid-cols-2 gap-3">
               <div className="card">
-                <p className="text-xs text-civic-muted mb-1 uppercase tracking-wide font-semibold">Category</p>
-                <p className="font-black text-civic-text text-lg">{analysis.category}</p>
+                <p className="text-xs text-white/40 mb-1 uppercase tracking-wide font-semibold">Category</p>
+                <p className="font-black text-white text-lg">{analysis.category}</p>
               </div>
               <div className="card">
-                <p className="text-xs text-civic-muted mb-2 uppercase tracking-wide font-semibold">Priority</p>
+                <p className="text-xs text-white/40 mb-2 uppercase tracking-wide font-semibold">Priority</p>
                 <PriorityBadge priority={analysis.priority} size="lg" />
               </div>
               <div className="card col-span-2">
                 <div className="flex items-start gap-3">
-                  <Building2 className="w-5 h-5 text-civic-yellow mt-0.5 flex-shrink-0" />
+                  <Building2 className="w-5 h-5 text-[#FFC400] mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-xs text-civic-muted mb-0.5 uppercase tracking-wide font-semibold">Responsible Department</p>
-                    <p className="font-bold text-civic-text">{analysis.department}</p>
+                    <p className="text-xs text-white/40 mb-0.5 uppercase tracking-wide font-semibold">Responsible Department</p>
+                    <p className="font-bold text-white">{analysis.department}</p>
                     {analysis.assignedTeam && (
-                      <p className="text-xs text-civic-yellow mt-0.5">→ {analysis.assignedTeam}</p>
+                      <p className="text-xs text-[#FFC400] mt-0.5">→ {analysis.assignedTeam}</p>
                     )}
                   </div>
                 </div>
               </div>
               <div className="card">
                 <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-civic-red mt-0.5 flex-shrink-0" />
+                  <MapPin className="w-4 h-4 text-[#E10600] mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-xs text-civic-muted mb-0.5">Location</p>
-                    <p className="font-semibold text-civic-text text-sm">{analysis.location}</p>
+                    <p className="text-xs text-white/40 mb-0.5">Location</p>
+                    <p className="font-semibold text-white text-sm truncate">{analysis.location}</p>
                   </div>
                 </div>
               </div>
               <div className="card">
                 <div className="flex items-start gap-2">
-                  <Zap className="w-4 h-4 text-civic-yellow mt-0.5 flex-shrink-0" />
+                  <Zap className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-xs text-civic-muted mb-0.5">Est. Response</p>
-                    <p className="font-bold text-civic-yellow text-sm">{analysis.estimatedResponse}</p>
+                    <p className="text-xs text-white/40 mb-0.5">Est. Response</p>
+                    <p className="font-bold text-[#FFC400] text-sm">{analysis.estimatedResponse}</p>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Action buttons */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 pt-2">
               <button onClick={() => navigate('/report')} className="btn-secondary justify-center py-4">
                 <Edit3 className="w-5 h-5" />
                 Edit Details
@@ -289,7 +319,7 @@ const AIAnalysisPage: React.FC = () => {
               <button
                 onClick={handleConfirm}
                 disabled={submitting}
-                className="btn-primary justify-center py-4 text-sm font-bold shadow-sm hover:shadow active:scale-[0.98] transition-all duration-150"
+                className="btn-primary justify-center py-4 text-sm font-bold shadow-sm hover:shadow active:scale-[0.98] transition-all duration-150 glow-red"
               >
                 {submitting ? (
                   <><Loader2 className="w-5 h-5 animate-spin" />Submitting...</>
@@ -299,8 +329,8 @@ const AIAnalysisPage: React.FC = () => {
               </button>
             </div>
 
-            <p className="text-xs text-civic-muted text-center">
-              By confirming, your complaint will be submitted and routed to the appropriate department.
+            <p className="text-xs text-white/40 text-center">
+              By confirming, your complaint will be permanently stored and routed to municipal field dispatch.
             </p>
           </div>
         )}

@@ -82,6 +82,10 @@ export interface Complaint {
   timeline: TimelineEvent[];
   aiConfidence?: number;
   aiReason?: string;
+  publicSafetyImpact?: string;
+  inspectionRequired?: boolean;
+  locationRisk?: string;
+  actionPlan?: string;
   contactPreference?: string;
   isAnonymous?: boolean;
   escalationLevel?: number;

@@ -1,18 +1,13 @@
 /**
- * authService.ts — Auth API calls and token management.
+ * authService.ts — Production Auth API calls and JWT session management.
  *
- * Two-layer auth:
- * 1. API layer  — calls FastAPI when VITE_API_BASE_URL is set and reachable.
- * 2. Demo layer — localStorage fallback when backend is not running.
- *
- * Backend is always the authority when available.
- * Demo mode is for local development / SIH demonstration without a running server.
+ * All authentication is backed permanently by the backend SQLite / Postgres database.
+ * Real bcrypt password verification and cryptographically signed JWT tokens.
  */
 
-import { api, isBackendAvailable } from './api';
+import { api } from './api';
 
-const TOKEN_KEY  = 'civic_token';
-const USERS_KEY  = 'civic_demo_users';
+const TOKEN_KEY = 'civic_token';
 
 // ── Token payload shape (mirrors backend JWT claims) ──────────────────────────
 export interface TokenPayload {
@@ -42,100 +37,13 @@ export interface UserOut {
   created_at: string;
 }
 
-// ── Demo user store (localStorage) ────────────────────────────────────────────
-interface DemoUser {
-  id: number;
-  full_name: string;
-  email: string;
-  phone: string;
-  password: string;   // plain — demo only, never send to a real server
-  role: 'citizen' | 'admin';
-  created_at: string;
-}
-
-function getDemoUsers(): DemoUser[] {
-  try {
-    const stored = localStorage.getItem(USERS_KEY);
-    const users: DemoUser[] = stored ? (JSON.parse(stored) as DemoUser[]) : [];
-    // Ensure default admin always exists and has valid password
-    let admin = users.find((u) => u.role === 'admin' || u.email.toLowerCase() === 'admin@civicresolve.ai');
-    if (!admin) {
-      admin = {
-        id: 1,
-        full_name: 'CivicResolve Admin',
-        email: 'admin@civicresolve.ai',
-        phone: '',
-        password: 'admin123',
-        role: 'admin',
-        created_at: new Date().toISOString(),
-      };
-      users.push(admin);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    } else {
-      admin.email = 'admin@civicresolve.ai';
-      admin.password = 'admin123';
-      admin.role = 'admin';
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    }
-    return users;
-  } catch {
-    return [
-      {
-        id: 1,
-        full_name: 'CivicResolve Admin',
-        email: 'admin@civicresolve.ai',
-        phone: '',
-        password: 'admin123',
-        role: 'admin',
-        created_at: new Date().toISOString(),
-      },
-    ];
-  }
-}
-
-function saveDemoUsers(users: DemoUser[]): void {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-/** Build a fake JWT-shaped token for demo mode.
- *  Not cryptographically signed — purely for UI/UX flow. */
-function buildDemoToken(user: DemoUser): string {
-  const now    = Math.floor(Date.now() / 1000);
-  const expiry = now + (user.role === 'admin' ? 8 * 3600 : 24 * 3600);
-  const header  = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = btoa(
-    JSON.stringify({
-      sub:       String(user.id),
-      email:     user.email,
-      role:      user.role,
-      full_name: user.full_name,
-      iat:       now,
-      exp:       expiry,
-    }),
-  );
-  // Fake signature — not verifiable, only used client-side for UX
-  const sig = btoa('demo-signature');
-  return `${header}.${payload}.${sig}`;
-}
-
-function buildTokenResponse(user: DemoUser, token: string): TokenResponse {
-  return {
-    access_token: token,
-    token_type:   'bearer',
-    role:         user.role,
-    user_id:      user.id,
-    full_name:    user.full_name,
-    email:        user.email,
-  };
-}
-
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
 export function decodeToken(token: string): TokenPayload | null {
   try {
-    const b64     = token.split('.')[1];
+    const b64 = token.split('.')[1];
     if (!b64) return null;
-    const json    = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    const json = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
     const payload = JSON.parse(json) as TokenPayload;
     if (payload.exp && payload.exp * 1000 < Date.now()) {
       clearToken();
@@ -163,7 +71,6 @@ export function storeToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem('civicresolve_complaints');
 }
 
 export function isAuthenticated(): boolean {
@@ -240,4 +147,3 @@ export async function updateProfile(data: {
 }): Promise<UserOut> {
   return await api.put<UserOut>('/auth/profile', data);
 }
-

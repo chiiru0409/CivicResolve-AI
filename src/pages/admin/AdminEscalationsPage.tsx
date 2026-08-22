@@ -3,8 +3,7 @@ import { AlertTriangle, Clock, CheckCircle, Loader2 } from 'lucide-react';
 import { useAdminComplaints } from '../../hooks/useComplaints';
 import PriorityBadge from '../../components/PriorityBadge';
 import StatusBadge from '../../components/StatusBadge';
-import { api, isBackendAvailable } from '../../services/api';
-import { escalateComplaint } from '../../services/complaintService';
+import { api } from '../../services/api';
 import { useToast, ToastContainer } from '../../components/Toast';
 import { formatDate, getCategoryEmoji } from '../../utils/helpers';
 
@@ -30,11 +29,11 @@ export default function AdminEscalationsPage() {
   const handleEscalate = async (id: string) => {
     setEscalating(id);
     try {
-      if (isBackendAvailable()) {
-        await api.patch(`/admin/complaints/${id}/status`, { status: 'Escalated', message: 'Escalated due to overdue response time.', updated_by: 'system' });
-      } else {
-        escalateComplaint(id);
-      }
+      await api.patch(`/admin/complaints/${id}/status`, {
+        status: 'Escalated',
+        message: 'Escalated due to overdue response time.',
+        updated_by: 'system',
+      });
       addToast(`${id} escalated.`, 'warning');
       refetch();
     } catch (e) {

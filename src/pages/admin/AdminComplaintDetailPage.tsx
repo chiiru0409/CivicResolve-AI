@@ -1,22 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, Zap, Loader2, CheckCircle, Edit2,
-  Scan, Camera, Eye, Shield, AlertTriangle, Sparkles, CheckCircle2, ChevronRight
+  Camera, Shield, AlertTriangle, Sparkles, CheckCircle2, AlertOctagon, Clock,
+  FileCheck
 } from 'lucide-react';
 import PriorityBadge from '../../components/PriorityBadge';
 import StatusBadge from '../../components/StatusBadge';
 import ComplaintTimeline from '../../components/ComplaintTimeline';
 import ComplaintLocationMap from '../../components/ComplaintLocationMap';
-import { api, isBackendAvailable } from '../../services/api';
-import { getAllComplaints, updateComplaintStatus } from '../../services/complaintService';
-import type { Complaint } from '../../types';
+import { api } from '../../services/api';
+import { mapApiComplaint } from '../../services/complaintService';
+import type { Complaint, ComplaintStatus } from '../../types';
 import { useToast, ToastContainer } from '../../components/Toast';
 import { formatDateTime, getCategoryEmoji } from '../../utils/helpers';
 import SkeletonCard from '../../components/SkeletonCard';
 
-type AdminStatus = 'Assigned' | 'In Progress' | 'Inspection' | 'Resolved' | 'Closed';
-const STATUS_ACTIONS: AdminStatus[] = ['Assigned', 'In Progress', 'Inspection', 'Resolved', 'Closed'];
+const STATUS_ACTIONS: ComplaintStatus[] = ['Assigned', 'In Progress', 'Inspection', 'Resolved', 'Closed'];
 
 export default function AdminComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -29,75 +29,35 @@ export default function AdminComplaintDetailPage() {
   const [officer, setOfficer]     = useState('');
   const [viewMode, setViewMode]   = useState<'original' | 'ai_overlay'>('ai_overlay');
 
-  useEffect(() => {
-    if (!id) return;
-    loadComplaint(id);
-  }, [id]);
-
-  const loadComplaint = async (cid: string) => {
+  const loadComplaint = useCallback(async (cid: string) => {
     setLoading(true);
     try {
-      if (isBackendAvailable()) {
-        const raw = await api.get<Record<string, unknown>>(`/admin/complaints/${cid}`);
-        // Map API response to Complaint
-        const c: Complaint = {
-          id:                String(raw.complaint_number ?? raw.id),
-          title:             String(raw.title ?? ''),
-          description:       String(raw.description ?? ''),
-          category:          raw.category as Complaint['category'],
-          priority:          raw.priority as Complaint['priority'],
-          status:            raw.status as Complaint['status'],
-          department:        String(raw.department ?? ''),
-          location:          String(raw.location ?? ''),
-          latitude:          raw.latitude != null ? Number(raw.latitude) : undefined,
-          longitude:         raw.longitude != null ? Number(raw.longitude) : undefined,
-          landmark:          raw.landmark as string | undefined,
-          imageUrl:          (raw.image_path as string) || undefined,
-          evidenceQuality:   (raw.evidence_quality as string) || (raw.image_path ? 'HIGH / VERIFIED BY PHOTO' : 'LOW — No photo proof provided'),
-          submittedAt:       String(raw.created_at ?? ''),
-          updatedAt:         String(raw.updated_at ?? ''),
-          assignedTo:        raw.assigned_officer as string | undefined,
-          estimatedResponse: raw.estimated_response as string | undefined,
-          aiConfidence:      raw.ai_confidence as number | undefined,
-          aiReason:          raw.ai_reason as string | undefined,
-          escalationLevel:   Number(raw.escalation_level ?? 0),
-          zone:              raw.zone as string | undefined,
-          isAnonymous:       Boolean(raw.is_anonymous),
-          contactPreference: String(raw.contact_preference ?? 'email'),
-          source:            (raw.source as string) ?? (raw.contact_preference === 'voice' ? 'AI Call' : 'Web'),
-          timeline: [],
-        };
-        const updates = raw.updates as Array<{ status: string; message: string | null; created_at: string }> ?? [];
-        c.timeline = ['Submitted','AI_Analysis','Routed','Assigned','In Progress','Inspection','Resolved'].map((step, i) => {
-          const u = updates.find((x) => x.status === step);
-          const isDone = updates.some((x) => x.status === step);
-          const isCurr = c.status === step;
-          return { id: `s${i}`, label: step === 'AI_Analysis' ? 'AI Analysis' : step === 'In Progress' ? 'Work In Progress' : step, timestamp: u?.created_at ?? (isDone ? c.submittedAt : null), status: isCurr ? 'current' : isDone ? 'completed' : 'pending', note: u?.message ?? undefined } as Complaint['timeline'][0];
-        });
-        setComplaint(c);
-        setDepartment(c.department ?? '');
-        setOfficer(c.assignedTo ?? '');
-      } else {
-        const all = getAllComplaints();
-        const c = all.find((x) => x.id === cid);
-        if (c) { setComplaint(c); setDepartment(c.department ?? ''); setOfficer(c.assignedTo ?? ''); }
-      }
+      const raw = await api.get<Record<string, unknown>>(`/admin/complaints/${cid}`);
+      const c = mapApiComplaint(raw);
+      setComplaint(c);
+      setDepartment(c.department ?? '');
+      setOfficer(c.assignedTo ?? '');
     } catch (e) {
-      addToast('Failed to load complaint.', 'error');
+      addToast('Failed to load complaint from server.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
-  const handleStatusUpdate = async (newStatus: AdminStatus) => {
+  useEffect(() => {
+    if (!id) return;
+    void loadComplaint(id);
+  }, [id, loadComplaint]);
+
+  const handleStatusUpdate = async (newStatus: ComplaintStatus) => {
     if (!id || !complaint) return;
     setUpdating(true);
     try {
-      if (isBackendAvailable()) {
-        await api.patch(`/admin/complaints/${id}/status`, { status: newStatus, message: `Status updated to ${newStatus}`, updated_by: 'admin' });
-      } else {
-        updateComplaintStatus(complaint.id, newStatus as Complaint['status']);
-      }
+      await api.patch(`/admin/complaints/${id}/status`, {
+        status: newStatus,
+        message: `Admin status update: ${newStatus}`,
+        updated_by: 'admin',
+      });
       addToast(`Status updated to "${newStatus}"`, 'success');
       await loadComplaint(id);
     } catch (e) {
@@ -111,10 +71,12 @@ export default function AdminComplaintDetailPage() {
     if (!id || !department) return;
     setUpdating(true);
     try {
-      if (isBackendAvailable()) {
-        await api.post(`/admin/complaints/${id}/assign`, { department, officer: officer || undefined, assigned_by: 'admin' });
-      }
-      addToast('Assignment saved.', 'success');
+      await api.post(`/admin/complaints/${id}/assign`, {
+        department,
+        officer: officer || undefined,
+        assigned_by: 'admin',
+      });
+      addToast('Department assignment saved.', 'success');
       await loadComplaint(id);
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Assignment failed.', 'error');
@@ -124,7 +86,14 @@ export default function AdminComplaintDetailPage() {
   };
 
   if (loading) return <div className="p-6"><SkeletonCard lines={6} /></div>;
-  if (!complaint) return <div className="p-6 text-white/50">Complaint not found.</div>;
+  if (!complaint) return (
+    <div className="p-6 text-center space-y-4">
+      <p className="text-white/50">Complaint not found in database.</p>
+      <button onClick={() => navigate('/admin/complaints')} className="btn-secondary mx-auto">
+        Back to complaints list
+      </button>
+    </div>
+  );
 
   const hasPhoto = Boolean(complaint.imageUrl && complaint.imageUrl.trim());
 
@@ -132,12 +101,14 @@ export default function AdminComplaintDetailPage() {
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      <button onClick={() => navigate('/admin/complaints')}
-        className="flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors">
+      <button
+        onClick={() => navigate('/admin/complaints')}
+        className="flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors"
+      >
         <ArrowLeft className="w-4 h-4" /> Back to complaints
       </button>
 
-      {/* Header */}
+      {/* Header Banner */}
       <div className="relative bg-[#111] border border-white/8 rounded-3xl p-6 sm:p-7 overflow-hidden shadow-2xl">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#E10600] via-[#FFC400] to-[#22C55E]" />
         <div className="flex items-start justify-between flex-wrap gap-4">
@@ -146,7 +117,7 @@ export default function AdminComplaintDetailPage() {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <p className="text-xs font-black font-mono text-[#E10600]">{complaint.id}</p>
-                <span className="telemetry-chip">[ DISPATCH LOG ]</span>
+                <span className="telemetry-chip">[ LIVE INCIDENT RECORD ]</span>
               </div>
               <h1 className="text-xl sm:text-3xl font-black text-white font-display">{complaint.title}</h1>
               <div className="flex flex-wrap gap-2 mt-2.5 items-center">
@@ -162,6 +133,11 @@ export default function AdminComplaintDetailPage() {
                 {complaint.source && (
                   <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-white/5 text-white/50 border-white/10 font-mono">
                     {complaint.source === 'AI Call' ? '📞 AI Call' : '🌐 Web'}
+                  </span>
+                )}
+                {complaint.inspectionRequired && (
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-[#E10600]/10 text-[#E10600] border-[#E10600]/30 font-mono">
+                    🔍 Site Inspection Required
                   </span>
                 )}
               </div>
@@ -184,10 +160,10 @@ export default function AdminComplaintDetailPage() {
       {/* 2-Column Responsive Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        {/* Left Column (Complaint info, Photo Proof & AI Vision, AI Operations Copilot, Assignment, Status actions, Timeline) */}
+        {/* Left Column */}
         <div className="lg:col-span-7 space-y-6">
 
-          {/* ── Photo Proof & AI Vision Analysis Section (Section 8 Mandatory) ── */}
+          {/* Photo Proof & AI Vision Analysis Section */}
           <div className="glass-panel-luxury p-6 rounded-3xl space-y-4 cyber-border-red">
             <div className="flex items-center justify-between border-b border-white/8 pb-3">
               <div className="flex items-center gap-2">
@@ -245,7 +221,6 @@ export default function AdminComplaintDetailPage() {
                   {/* AI Vision Overlay Markings */}
                   {viewMode === 'ai_overlay' && (
                     <div className="absolute inset-0 pointer-events-none">
-                      {/* Bounding Box on Damaged Region */}
                       <div
                         className="absolute border-2 border-[#FFC400] rounded-xl shadow-[0_0_15px_rgba(255,196,0,0.5)] animate-pulse"
                         style={{ top: '22%', left: '18%', width: '58%', height: '52%' }}
@@ -268,7 +243,7 @@ export default function AdminComplaintDetailPage() {
                     <span className="text-xs font-mono text-[#22C55E] font-bold">✓ CONFIRMED SURFACE HAZARD</span>
                   </div>
                   <p className="text-xs text-white/80 leading-relaxed font-light">
-                    AI detected structural civic damage consistent with <strong className="text-white">{complaint.category}</strong>. Public safety risk calculated as <strong className="text-[#FFC400]">{complaint.priority}</strong>.
+                    AI detected structural civic damage consistent with <strong className="text-white">{complaint.category}</strong>. Public safety risk assessed as <strong className="text-[#FFC400]">{complaint.priority}</strong>.
                   </p>
                 </div>
               </div>
@@ -283,7 +258,7 @@ export default function AdminComplaintDetailPage() {
             )}
           </div>
 
-          {/* ── AI Operations Copilot Recommendation (Section 9 & 10) ───── */}
+          {/* AI Operations Copilot Recommendation */}
           <div className="glass-panel-luxury p-6 rounded-3xl space-y-4 cyber-border-gold">
             <div className="flex items-center justify-between border-b border-white/8 pb-3">
               <div className="flex items-center gap-2">
@@ -296,7 +271,7 @@ export default function AdminComplaintDetailPage() {
             <div className="bg-[#111] p-4 rounded-2xl border border-white/8 space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                 <div className="bg-white/4 p-2 rounded-xl">
-                  <span className="text-[10px] font-mono text-white/40 uppercase block">RECOMMENDED PRIORITY</span>
+                  <span className="text-[10px] font-mono text-white/40 uppercase block">PRIORITY</span>
                   <span className="text-xs font-black text-[#E10600] mt-0.5 block">{complaint.priority}</span>
                 </div>
                 <div className="bg-white/4 p-2 rounded-xl">
@@ -305,7 +280,7 @@ export default function AdminComplaintDetailPage() {
                 </div>
                 <div className="bg-white/4 p-2 rounded-xl">
                   <span className="text-[10px] font-mono text-white/40 uppercase block">LOCATION RISK</span>
-                  <span className="text-xs font-black text-[#FFC400] mt-0.5 block">HIGH TRAFFIC</span>
+                  <span className="text-xs font-black text-[#FFC400] mt-0.5 block">{complaint.locationRisk || 'HIGH TRAFFIC'}</span>
                 </div>
                 <div className="bg-white/4 p-2 rounded-xl">
                   <span className="text-[10px] font-mono text-white/40 uppercase block">TARGET SLA</span>
@@ -313,12 +288,34 @@ export default function AdminComplaintDetailPage() {
                 </div>
               </div>
 
+              {complaint.publicSafetyImpact && (
+                <div>
+                  <p className="text-[10px] font-mono uppercase text-[#E10600] mb-1 flex items-center gap-1">
+                    <AlertOctagon className="w-3 h-3" /> Public Safety Impact:
+                  </p>
+                  <p className="text-xs text-white/90 leading-relaxed bg-[#E10600]/5 p-3 rounded-xl border border-[#E10600]/20 font-medium">
+                    {complaint.publicSafetyImpact}
+                  </p>
+                </div>
+              )}
+
               <div>
                 <p className="text-[10px] font-mono uppercase text-white/40 mb-1">AI Tactical Reasoning:</p>
                 <p className="text-xs text-white/80 leading-relaxed italic bg-white/3 p-3 rounded-xl border border-white/6">
                   "{complaint.aiReason || 'Corridor requires immediate crew dispatch to prevent traffic congestion and pedestrian safety hazard.'}"
                 </p>
               </div>
+
+              {complaint.actionPlan && (
+                <div>
+                  <p className="text-[10px] font-mono uppercase text-white/40 mb-1 flex items-center gap-1">
+                    <FileCheck className="w-3 h-3 text-[#22C55E]" /> Suggested Operational Action Plan:
+                  </p>
+                  <pre className="text-xs text-white/70 whitespace-pre-line font-sans bg-white/3 p-3 rounded-xl border border-white/6 leading-relaxed">
+                    {complaint.actionPlan}
+                  </pre>
+                </div>
+              )}
             </div>
 
             {/* 1-Click Fast Actions */}
@@ -342,7 +339,7 @@ export default function AdminComplaintDetailPage() {
             </div>
           </div>
 
-          {/* ── Complaint Details Card ────────────────────────────────────── */}
+          {/* Complaint Details Card */}
           <div className="card space-y-3">
             <h2 className="font-black text-white font-display">Complaint Information</h2>
             <div className="bg-white/5 border border-white/8 rounded-2xl p-4">
@@ -369,7 +366,7 @@ export default function AdminComplaintDetailPage() {
             </div>
           </div>
 
-          {/* ── Department & Officer Assignment ──────────────────────────── */}
+          {/* Department & Officer Assignment */}
           <div className="card space-y-4">
             <h2 className="font-black text-white flex items-center gap-2 font-display">
               <Edit2 className="w-4 h-4 text-[#E10600]" /> Authority Assignment
@@ -377,34 +374,48 @@ export default function AdminComplaintDetailPage() {
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">Department</label>
-                <input value={department} onChange={(e) => setDepartment(e.target.value)}
-                  placeholder="Department name" className="input-field" />
+                <input
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  placeholder="Department name"
+                  className="input-field"
+                />
               </div>
               <div>
                 <label className="label">Officer / Team</label>
-                <input value={officer} onChange={(e) => setOfficer(e.target.value)}
-                  placeholder="Officer or Team name" className="input-field" />
+                <input
+                  value={officer}
+                  onChange={(e) => setOfficer(e.target.value)}
+                  placeholder="Officer or Team name"
+                  className="input-field"
+                />
               </div>
             </div>
-            <button onClick={handleAssign} disabled={updating || !department}
-              className="btn-primary">
+            <button
+              onClick={handleAssign}
+              disabled={updating || !department}
+              className="btn-primary"
+            >
               {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
               Save Assignment
             </button>
           </div>
 
-          {/* ── Status Lifecycle Actions ─────────────────────────────────── */}
+          {/* Status Lifecycle Actions */}
           <div className="card space-y-3">
             <h2 className="font-black text-white font-display">Update Resolution Status</h2>
             <div className="flex flex-wrap gap-2">
               {STATUS_ACTIONS.map((s) => (
-                <button key={s} onClick={() => handleStatusUpdate(s)}
+                <button
+                  key={s}
+                  onClick={() => handleStatusUpdate(s)}
                   disabled={updating || complaint.status === s}
                   className={`flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl transition-all ${
                     complaint.status === s
                       ? 'bg-[#E10600] text-white shadow-[0_0_15px_rgba(225,6,0,0.4)]'
                       : 'bg-white/5 text-white/50 hover:bg-[#E10600]/10 hover:text-[#E10600] border border-white/8 hover:border-[#E10600]/30'
-                  }`}>
+                  }`}
+                >
                   {updating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   {s}
                 </button>
@@ -412,7 +423,7 @@ export default function AdminComplaintDetailPage() {
             </div>
           </div>
 
-          {/* ── Real Status Timeline ─────────────────────────────────────── */}
+          {/* Real Status Timeline */}
           <div className="card">
             <h2 className="font-black text-white mb-5 font-display">Status Timeline</h2>
             <ComplaintTimeline events={complaint.timeline} />

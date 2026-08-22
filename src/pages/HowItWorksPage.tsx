@@ -15,11 +15,11 @@ const pipeline = [
 
 const techStack = [
   { label: 'Frontend',   tech: 'React 18 + TypeScript + Vite',   color: 'text-blue-400 bg-blue-400/10 border-blue-400/30' },
-  { label: 'Styling',    tech: 'Tailwind CSS + Custom Theme',     color: 'text-cyan-400 bg-cyan-400/10 border-cyan-400/30' },
-  { label: 'AI Engine',  tech: 'Keyword NLP + Vision Simulation', color: 'text-civic-red bg-civic-red/10 border-civic-red/30' },
-  { label: 'Storage',    tech: 'LocalStorage (Demo Mode)',        color: 'text-civic-success bg-civic-success/10 border-civic-success/30' },
+  { label: 'Backend',    tech: 'FastAPI + Python + REST API',     color: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' },
+  { label: 'Database',   tech: 'SQLite & PostgreSQL Architecture', color: 'text-civic-success bg-civic-success/10 border-civic-success/30' },
+  { label: 'AI Engine',  tech: 'Local LLM + Vision Underwriting', color: 'text-civic-red bg-civic-red/10 border-civic-red/30' },
   { label: 'Routing',    tech: 'React Router v6',                 color: 'text-civic-yellow bg-civic-yellow/10 border-civic-yellow/30' },
-  { label: 'Icons',      tech: 'Lucide React',                    color: 'text-civic-muted bg-civic-elevated border-civic-border' },
+  { label: 'Maps',       tech: 'Leaflet + OpenStreetMap GIS',     color: 'text-cyan-400 bg-cyan-400/10 border-cyan-400/30' },
 ];
 
 const futureIntegrations = [

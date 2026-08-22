@@ -142,20 +142,41 @@ def _rule_based_analysis(
     confidence          = _calculate_confidence(description, category)
     estimated_response  = get_estimated_response(priority)
 
+    # 13-point civic intelligence rubric enhancements
+    is_high_risk = priority in ("HIGH", "CRITICAL") or severity >= 7
+    inspection_required = 1 if is_high_risk else (1 if category in ("Roads", "Infrastructure", "Drainage") else 0)
+
+    safety_impacts = {
+        "Roads": "Hazardous road condition posing vehicle collision risk, tire damage, and pedestrian stumble danger." if is_high_risk else "Minor vehicular disruption with low pedestrian hazard.",
+        "Garbage": "Bio-sanitary hazard with potential vector breeding (rodents, flies) and toxic runoff." if is_high_risk else "Public aesthetic and neighborhood odor inconvenience.",
+        "Drainage": "Stagnant contaminated blackwater overflow risking gastrointestinal pathogens and road submergence." if is_high_risk else "Minor stormwater flow obstruction.",
+        "Water": "Clean drinking water wastage or pipeline contamination risk affecting neighborhood supply." if is_high_risk else "Low-pressure or localized pipeline drip.",
+        "Streetlights": "Complete nocturnal darkness creating acute crime and pedestrian accident vulnerability." if is_high_risk else "Isolated illumination outage.",
+        "Infrastructure": "Structural degradation risking collapse or public bodily injury." if is_high_risk else "Cosmetic public infrastructure wear.",
+        "Other": "Civic disruption requiring municipal administrative review."
+    }
+    public_safety_impact = safety_impacts.get(category, "Civic issue under assessment.")
+    location_risk = "High-density pedestrian/transit corridor" if is_high_risk else "Standard municipal zone"
+    action_plan = f"1. Log issue in {dept_name} queue.\n2. Dispatch {assigned_team} within {estimated_response}.\n3. Perform site assessment and execute repairs.\n4. Close incident with photographic resolution proof."
+
     return {
-        "category":           category,
-        "subcategory":        None,
-        "priority":           priority,
-        "severity":           severity,
-        "department_id":      dept_id,
-        "department_name":    dept_name,
-        "assigned_team":      assigned_team,
-        "title":              title,
-        "ai_reason":          reason,
-        "ai_confidence":      confidence,
-        "estimated_response": estimated_response,
-        "zone":               zone,
-        "analysis_source":    "rule-based",
+        "category":             category,
+        "subcategory":          None,
+        "priority":             priority,
+        "severity":             severity,
+        "department_id":        dept_id,
+        "department_name":      dept_name,
+        "assigned_team":        assigned_team,
+        "title":                title,
+        "ai_reason":            reason,
+        "ai_confidence":        confidence,
+        "estimated_response":   estimated_response,
+        "zone":                 zone,
+        "public_safety_impact": public_safety_impact,
+        "inspection_required":  inspection_required,
+        "location_risk":        location_risk,
+        "action_plan":          action_plan,
+        "analysis_source":      "rule-based",
     }
 
 
@@ -231,18 +252,22 @@ def run_analysis(
         analysis.get("ai_confidence", "?"),
     )
 
-    # Return the standardised dict (main.py expects these exact keys)
+    # Return the standardised dict (main.py expects these keys)
     return {
-        "category":           analysis["category"],
-        "subcategory":        analysis.get("subcategory"),
-        "priority":           analysis["priority"],
-        "severity":           analysis.get("severity", 5),
-        "department_id":      analysis["department_id"],
-        "department_name":    analysis["department_name"],
-        "assigned_team":      analysis["assigned_team"],
-        "title":              analysis.get("title", _generate_title(description, analysis["category"], analysis["priority"])),
-        "ai_reason":          analysis.get("ai_reason", _generate_reason(analysis["category"], analysis["priority"])),
-        "ai_confidence":      analysis.get("ai_confidence", 70),
-        "estimated_response": analysis["estimated_response"],
-        "zone":               analysis["zone"],
+        "category":             analysis["category"],
+        "subcategory":          analysis.get("subcategory"),
+        "priority":             analysis["priority"],
+        "severity":             analysis.get("severity", 5),
+        "department_id":        analysis["department_id"],
+        "department_name":      analysis["department_name"],
+        "assigned_team":        analysis["assigned_team"],
+        "title":                analysis.get("title", _generate_title(description, analysis["category"], analysis["priority"])),
+        "ai_reason":            analysis.get("ai_reason", _generate_reason(analysis["category"], analysis["priority"])),
+        "ai_confidence":        analysis.get("ai_confidence", 70),
+        "estimated_response":   analysis["estimated_response"],
+        "zone":                 analysis["zone"],
+        "public_safety_impact": analysis.get("public_safety_impact", "Civic issue under evaluation"),
+        "inspection_required":  analysis.get("inspection_required", 0),
+        "location_risk":        analysis.get("location_risk", "Standard municipal zone"),
+        "action_plan":          analysis.get("action_plan", "Standard municipal dispatch"),
     }

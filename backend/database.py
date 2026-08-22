@@ -164,6 +164,10 @@ _MIGRATION_COLUMNS = [
     ("complaints", "resolved_at",        "TEXT"),
     ("complaints", "complaint_number",   "TEXT"),   # may already exist
     ("complaints", "evidence_quality",   "TEXT DEFAULT 'LOW — No photo proof provided'"),
+    ("complaints", "public_safety_impact","TEXT"),
+    ("complaints", "inspection_required","INTEGER DEFAULT 0"),
+    ("complaints", "location_risk",      "TEXT"),
+    ("complaints", "action_plan",        "TEXT"),
     ("complaint_updates", "updated_by",  "TEXT DEFAULT 'system'"),
     ("assignments", "officer",           "TEXT"),
     ("assignments", "team",              "TEXT"),
@@ -573,44 +577,7 @@ _INITIAL_COMPLAINTS_SEED = [
 
 
 def _seed_initial_complaints(conn: sqlite3.Connection) -> None:
-    cur = conn.execute("SELECT COUNT(*) as cnt FROM complaints;")
-    if cur.fetchone()["cnt"] > 0:
-        return
-    with conn:
-        for c in _INITIAL_COMPLAINTS_SEED:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO complaints (
-                    id, complaint_number, title, description, category, department,
-                    priority, severity, status, latitude, longitude, location, landmark,
-                    ai_confidence, ai_reason, assigned_officer, assigned_team,
-                    estimated_response, zone, citizen_id, is_anonymous, contact_preference,
-                    source, created_at, updated_at
-                ) VALUES (
-                    :id, :complaint_number, :title, :description, :category, :department,
-                    :priority, :severity, :status, :latitude, :longitude, :location, :landmark,
-                    :ai_confidence, :ai_reason, :assigned_officer, :assigned_team,
-                    :estimated_response, :zone, :citizen_id, :is_anonymous, :contact_preference,
-                    :source, :created_at, :updated_at
-                );
-                """,
-                c,
-            )
-            # Insert initial updates
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO complaint_updates (complaint_id, status, message, updated_by, created_at)
-                VALUES (?, 'Submitted', 'Complaint registered in CivicResolve system.', 'system', ?);
-                """,
-                (c["id"], c["created_at"]),
-            )
-            if c["status"] in ("Assigned", "In Progress", "Resolved"):
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO complaint_updates (complaint_id, status, message, updated_by, created_at)
-                    VALUES (?, ?, ?, 'admin', ?);
-                    """,
-                    (c["id"], c["status"], f"Complaint status updated to {c['status']}", c["updated_at"]),
-                )
-    logger.info("Initial complaints seeded (%d rows)", len(_INITIAL_COMPLAINTS_SEED))
+    # Production stabilization: Never seed fake/demo complaints.
+    # The database must strictly contain authoritative records created by users.
+    pass
 
