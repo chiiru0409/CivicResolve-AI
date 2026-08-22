@@ -54,6 +54,26 @@
       "destination": "/api"
     },
     {
+      "source": "/public/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/ai/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/complaints/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/analytics",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/map/(.*)",
+      "destination": "/api"
+    },
+    {
       "source": "/uploads/(.*)",
       "destination": "/api"
     },

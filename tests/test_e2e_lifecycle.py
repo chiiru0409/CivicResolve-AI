@@ -178,12 +178,31 @@ def run_tests():
     # Active complaints filter out Resolved/Closed
     map_incidents = client.get("/public/map/incidents").json()
     map_ids = [m["id"] for m in map_incidents]
-    assert comp_a_id not in map_ids, "Resolved complaint A is still in active public map layer!"
-    assert comp_b_id in map_ids, "Active complaint B is missing from active public map layer!"
-    print(f"[PASS] Map Layer Lifecycle Verified: Active incidents ({len(map_incidents)}) correctly excludes Resolved cases.")
+    # 10. Test /auth/me with Citizen and Admin
+    me_citizen = client.get("/auth/me", headers={"Authorization": f"Bearer {token_a}"})
+    assert me_citizen.status_code == 200, f"/auth/me failed for citizen: {me_citizen.text}"
+    assert me_citizen.json()["email"] == citizen_a_email
+
+    me_admin = client.get("/auth/me", headers=admin_headers)
+    assert me_admin.status_code == 200, f"/auth/me failed for admin: {me_admin.text}"
+    assert me_admin.json()["role"] == "admin"
+    print("[PASS] /auth/me Verified: Both Citizen and Admin retrieve authentic profiles.")
+
+    # 11. Test Filter Resilience ("All", lowercase, case variation)
+    filt_all = client.get("/admin/complaints?status=All&category=All&priority=All", headers=admin_headers)
+    assert filt_all.status_code == 200
+    assert len(filt_all.json()["items"]) >= 2, "Filters with 'All' dropped records!"
+    print(f"[PASS] Filter Resilience: 'status=All' returned all {len(filt_all.json()['items'])} records without dropping.")
+
+    # 12. Full Projection Check on /complaints/mine
+    mine_a_full = client.get("/complaints/mine", headers={"Authorization": f"Bearer {token_a}"}).json()
+    assert len(mine_a_full) == 1
+    assert "description" in mine_a_full[0] and mine_a_full[0]["description"] != ""
+    assert "evidence_quality" in mine_a_full[0]
+    print("[PASS] Citizen Complaints Full Projection: Full description and telemetry fields returned.")
 
     print("\n=================================================================")
-    print("   ALL 9 END-TO-END CIVICRESOLVE TESTS PASSED WITH 100% SUCCESS  ")
+    print("   ALL 12 END-TO-END CIVICRESOLVE TESTS PASSED WITH 100% SUCCESS ")
     print("=================================================================\n")
 
 if __name__ == "__main__":

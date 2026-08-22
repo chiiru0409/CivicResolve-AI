@@ -43,7 +43,7 @@ from fastapi.staticfiles import StaticFiles
 import auth as auth_module
 from auth import (
     create_token, create_user, get_user_by_email, get_user_by_id,
-    require_citizen, require_admin, verify_password, hash_password,
+    get_current_user, require_citizen, require_admin, verify_password, hash_password,
     get_admin_credentials, update_user_profile, seed_admin,
     CREATE_USERS_TABLE, CREATE_USERS_INDEX,
     ADD_CITIZEN_ID_COLUMN, ADD_CITIZEN_ID_INDEX,
@@ -320,10 +320,18 @@ def admin_login(body: AdminLogin):
 
 
 @router.get("/auth/me", response_model=UserOut)
-def get_me(current_user: dict = Depends(require_citizen)):
+def get_me(current_user: dict = Depends(get_current_user)):
     user = get_user_by_id(int(current_user["sub"]))
     if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
+        # Construct authoritative profile from cryptographically signed JWT claims
+        return {
+            "id": int(current_user.get("sub", 1)),
+            "full_name": current_user.get("full_name", ""),
+            "email": current_user.get("email", ""),
+            "phone": "",
+            "role": current_user.get("role", "citizen"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
     return user
 
 
@@ -495,15 +503,18 @@ def get_my_complaints(current_user: dict = Depends(require_citizen)):
     try:
         rows = conn.execute(
             """
-            SELECT id, complaint_number, title, category, priority, status,
-                   department, location, latitude, longitude, landmark,
-                   ai_confidence, created_at, updated_at
-            FROM complaints WHERE citizen_id = ?
+            SELECT * FROM complaints WHERE citizen_id = ?
             ORDER BY created_at DESC;
             """,
             (citizen_id,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            real_id = r["id"]
+            updates = _fetch_updates(conn, real_id)
+            assignments = _fetch_assignments(conn, real_id)
+            result.append(_row_to_complaint_out(dict(r), updates, assignments))
+        return result
     finally:
         conn.close()
 
@@ -766,26 +777,27 @@ def admin_list_complaints(
     try:
         where_clauses, params = [], []
 
-        if search:
+        if search and search.strip():
+            s = f"%{search.strip()}%"
             where_clauses.append("(title LIKE ? OR complaint_number LIKE ? OR location LIKE ? OR description LIKE ?)")
-            s = f"%{search}%"
             params.extend([s, s, s, s])
-        if category:
-            where_clauses.append("category = ?"); params.append(category)
-        if priority:
-            where_clauses.append("priority = ?"); params.append(priority)
-        if status_filter:
-            where_clauses.append("status = ?"); params.append(status_filter)
-        if department:
-            where_clauses.append("department LIKE ?"); params.append(f"%{department}%")
+        if category and category.strip() and category.strip().lower() != "all":
+            where_clauses.append("LOWER(category) = LOWER(?)")
+            params.append(category.strip())
+        if priority and priority.strip() and priority.strip().lower() != "all":
+            where_clauses.append("UPPER(priority) = UPPER(?)")
+            params.append(priority.strip())
+        if status_filter and status_filter.strip() and status_filter.strip().lower() != "all":
+            where_clauses.append("LOWER(status) = LOWER(?)")
+            params.append(status_filter.strip())
+        if department and department.strip() and department.strip().lower() != "all":
+            where_clauses.append("department LIKE ?")
+            params.append(f"%{department.strip()}%")
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         rows = conn.execute(
             f"""
-            SELECT id, complaint_number, title, category, priority, status,
-                   department, location, latitude, longitude, landmark,
-                   ai_confidence, source, created_at, updated_at
-            FROM complaints {where_sql}
+            SELECT * FROM complaints {where_sql}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?;
             """,
@@ -793,7 +805,14 @@ def admin_list_complaints(
         ).fetchall()
 
         total = conn.execute(f"SELECT COUNT(*) FROM complaints {where_sql};", params).fetchone()[0]
-        return {"total": total, "items": [dict(r) for r in rows]}
+        items = []
+        for r in rows:
+            real_id = r["id"]
+            updates = _fetch_updates(conn, real_id)
+            assignments = _fetch_assignments(conn, real_id)
+            items.append(_row_to_complaint_out(dict(r), updates, assignments))
+
+        return {"total": total, "items": items}
     finally:
         conn.close()
 
@@ -925,8 +944,9 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
         conn.close()
 
 
+@router.get("/departments")
 @router.get("/admin/departments")
-def admin_departments(current_user: dict = Depends(require_admin)):
+def list_departments(current_user: Optional[dict] = None):
     import json as _json
     conn = get_connection()
     try:

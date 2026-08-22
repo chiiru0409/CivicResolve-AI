@@ -205,15 +205,24 @@ class PostgresCursorWrapper:
         import re
         pg_sql = sql.replace("?", "%s")
         pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
-        # Capture inserted user id
-        is_insert_users = re.search(r"INSERT\s+INTO\s+users\b", pg_sql, re.IGNORECASE)
-        if is_insert_users and "RETURNING" not in pg_sql.upper():
-            pg_sql = pg_sql.rstrip().rstrip(";") + " RETURNING id;"
-            self._cur.execute(pg_sql, params or ())
-            res = self._cur.fetchone()
-            if res and "id" in res:
-                self.lastrowid = res["id"]
+        pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
+
+        # Ignore SQLite PRAGMAs on Postgres
+        if pg_sql.strip().upper().startswith("PRAGMA"):
             return self
+
+        # Capture inserted id for tables with RETURNING
+        is_insert = re.search(r"INSERT\s+INTO\s+(\w+)\b", pg_sql, re.IGNORECASE)
+        if is_insert and "RETURNING" not in pg_sql.upper():
+            table_name = is_insert.group(1).lower()
+            if table_name in ("users", "complaint_updates", "assignments"):
+                pg_sql = pg_sql.rstrip().rstrip(";") + " RETURNING id;"
+                self._cur.execute(pg_sql, params or ())
+                res = self._cur.fetchone()
+                if res and "id" in res:
+                    self.lastrowid = res["id"]
+                return self
 
         self._cur.execute(pg_sql, params or ())
         return self
@@ -222,6 +231,8 @@ class PostgresCursorWrapper:
         import re
         pg_sql = sql.replace("?", "%s")
         pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
         self._cur.executemany(pg_sql, params_seq)
         return self
 
@@ -264,10 +275,16 @@ class PostgresConnectionWrapper:
         self._conn.commit()
 
     def rollback(self):
-        self._conn.rollback()
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
 
     def close(self):
-        self._conn.close()
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
     def __enter__(self):
         return self
@@ -287,7 +304,15 @@ def get_connection():
     If DATABASE_URL or POSTGRES_URL is set, connects to PostgreSQL.
     Otherwise connects to SQLite.
     """
-    db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("POSTGRESQL_URL")
+    db_url = (
+        os.getenv("DATABASE_URL")
+        or os.getenv("POSTGRES_URL")
+        or os.getenv("POSTGRESQL_URL")
+        or os.getenv("POSTGRES_PRISMA_URL")
+        or os.getenv("POSTGRES_URL_NON_POOLING")
+        or os.getenv("NEON_DATABASE_URL")
+        or os.getenv("SUPABASE_DATABASE_URL")
+    )
     if db_url and db_url.startswith(("postgres://", "postgresql://")):
         try:
             import psycopg2
@@ -296,16 +321,23 @@ def get_connection():
         except Exception as exc:
             logger.error("PostgreSQL connection error, falling back to SQLite: %s", exc)
 
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA busy_timeout=5000;")
     return conn
 
 
 def _column_exists(conn, table: str, column: str) -> bool:
     """Return True if *column* already exists in *table*."""
     try:
+        if isinstance(conn, PostgresConnectionWrapper):
+            cur = conn.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s;",
+                (table.lower(), column.lower()),
+            )
+            return cur.fetchone() is not None
         cur = conn.execute(f"PRAGMA table_info({table});")
         return any(row["name"] == column for row in cur.fetchall())
     except Exception:
@@ -314,6 +346,12 @@ def _column_exists(conn, table: str, column: str) -> bool:
 
 def _table_exists(conn, table: str) -> bool:
     try:
+        if isinstance(conn, PostgresConnectionWrapper):
+            cur = conn.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_name = %s;",
+                (table.lower(),),
+            )
+            return cur.fetchone() is not None
         cur = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table,)
         )
@@ -352,13 +390,16 @@ def init_db() -> None:
                     try:
                         conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn};")
                         logger.info("Migration: added column %s.%s", table, col)
-                    except sqlite3.OperationalError as exc:
-                        # Column may have been added in a concurrent call — ignore
+                    except Exception as exc:
+                        # Column may have been added concurrently — ignore
                         logger.debug("Skipping migration %s.%s: %s", table, col, exc)
 
             # 3. Indexes
             for stmt in _INDEXES:
-                conn.execute(stmt)
+                try:
+                    conn.execute(stmt)
+                except Exception as exc:
+                    logger.debug("Index creation note: %s", exc)
 
             # 4. Ensure seed complaints never claim citizen_id
             try:
