@@ -88,7 +88,7 @@ export default function AdminComplaintsPage() {
   if (pri !== 'All') filters.priority = pri;
   if (stat !== 'All') filters.status  = stat;
 
-  const { complaints, total, loading } = useAdminComplaints(filters);
+  const { complaints, total, loading, error, refetch } = useAdminComplaints(filters);
   const hasFilters = search || cat !== 'All' || pri !== 'All' || stat !== 'All';
 
   return (
@@ -138,7 +138,17 @@ export default function AdminComplaintsPage() {
         )}
       </div>
 
-      {loading ? <SkeletonTable rows={6} /> : (
+      {loading ? (
+        <SkeletonTable rows={6} />
+      ) : error ? (
+        <div className="card text-center py-16 bg-[#111] border-white/10 rounded-3xl space-y-4 shadow-xl">
+          <p className="text-xl font-bold text-white">Unable to Load Incidents</p>
+          <p className="text-white/50 text-sm max-w-md mx-auto">{error}</p>
+          <button onClick={() => void refetch()} className="btn-primary py-2.5 px-5 text-sm font-semibold mx-auto inline-flex items-center gap-2">
+            Retry Connection
+          </button>
+        </div>
+      ) : (
         <div className="bg-[#0E0E0E] border border-white/8 rounded-3xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full">

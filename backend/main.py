@@ -1636,10 +1636,30 @@ def openapi_endpoint():
 @app.get("/health")
 @app.get("/api/health")
 def root_health():
+    conn = get_connection()
+    is_postgres = False
+    comp_count = 0
+    user_count = 0
+    try:
+        from database import PostgresConnectionWrapper
+        is_postgres = isinstance(conn, PostgresConnectionWrapper)
+        row = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()
+        comp_count = row[0] if row else 0
+        u_row = conn.execute("SELECT COUNT(*) FROM users;").fetchone()
+        user_count = u_row[0] if u_row else 0
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
     return {
         "status": "healthy",
         "service": "CivicResolve AI API",
         "version": "1.0.0",
+        "database_engine": "PostgreSQL" if is_postgres else "SQLite",
+        "database_persistent": is_postgres or not os.getenv("VERCEL"),
+        "total_complaints": comp_count,
+        "total_users": user_count,
         "environment": "production" if os.getenv("VERCEL") else "development",
     }
 

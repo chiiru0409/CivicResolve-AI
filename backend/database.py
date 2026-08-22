@@ -179,7 +179,7 @@ _MIGRATION_COLUMNS = [
 class RowWrapper(dict):
     """
     Dictionary wrapper that allows both column-name and integer index access,
-    mirroring sqlite3.Row behavior.
+    mirroring sqlite3.Row behavior, with case-insensitive key resolution.
     """
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -187,12 +187,24 @@ class RowWrapper(dict):
             if 0 <= key < len(vals):
                 return vals[key]
             raise IndexError(f"Tuple index {key} out of range ({len(vals)} items)")
+        if isinstance(key, str):
+            if key in self:
+                return super().__getitem__(key)
+            lower_map = {k.lower(): k for k in self.keys()}
+            if key.lower() in lower_map:
+                return super().__getitem__(lower_map[key.lower()])
         return super().__getitem__(key)
 
     def get(self, key, default=None):
         if isinstance(key, int):
             vals = list(self.values())
             return vals[key] if 0 <= key < len(vals) else default
+        if isinstance(key, str):
+            if key in self:
+                return super().get(key, default)
+            lower_map = {k.lower(): k for k in self.keys()}
+            if key.lower() in lower_map:
+                return super().get(lower_map[key.lower()], default)
         return super().get(key, default)
 
 
@@ -204,6 +216,10 @@ class PostgresCursorWrapper:
     def execute(self, sql: str, params: Any = None):
         import re
         pg_sql = sql.replace("?", "%s")
+        pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')", pg_sql, flags=re.IGNORECASE)
         pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
         pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
         pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
@@ -230,6 +246,10 @@ class PostgresCursorWrapper:
     def executemany(self, sql: str, params_seq: Any):
         import re
         pg_sql = sql.replace("?", "%s")
+        pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')", pg_sql, flags=re.IGNORECASE)
+        pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')", pg_sql, flags=re.IGNORECASE)
         pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
         pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
         pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)

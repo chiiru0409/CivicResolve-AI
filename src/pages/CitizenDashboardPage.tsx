@@ -15,7 +15,7 @@ import { formatDate, getCategoryEmoji, truncate } from '../utils/helpers';
 
 export default function CitizenDashboardPage() {
   const { user } = useAuth();
-  const { complaints, loading } = useCitizenComplaints();
+  const { complaints, loading, error, refetch } = useCitizenComplaints();
 
   const total    = complaints.length;
   const active   = complaints.filter((c) => !['Resolved', 'Closed'].includes(c.status)).length;
@@ -42,7 +42,9 @@ export default function CitizenDashboardPage() {
                   Welcome back, <span className="text-[#E10600]">{user?.full_name?.split(' ')[0] ?? 'Citizen'}</span>
                 </h1>
                 <p className="text-white/50 text-sm mt-1 max-w-xl">
-                  {total === 0
+                  {error
+                    ? 'Unable to sync live records with municipal database.'
+                    : total === 0
                     ? 'No complaints filed yet. Report an issue to start intelligent municipal resolution.'
                     : `You have ${active} active civic report(s) currently progressing through municipal verification.`}
                 </p>
@@ -59,6 +61,22 @@ export default function CitizenDashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* Error Alert Card if API failed */}
+          {error && (
+            <div className="card p-6 bg-[#181111] border-[#E10600]/30 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+              <div className="flex items-center gap-3 text-left">
+                <AlertTriangle className="w-6 h-6 text-[#E10600] flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-white">Connection issue: Unable to load your complaints</p>
+                  <p className="text-xs text-white/50 mt-0.5">{error}</p>
+                </div>
+              </div>
+              <button onClick={() => void refetch()} className="btn-primary py-2 px-4 text-xs font-semibold flex-shrink-0">
+                Retry Sync
+              </button>
+            </div>
+          )}
 
           {/* Telemetry Stats Grid */}
           {loading ? (

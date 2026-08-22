@@ -29,7 +29,7 @@ interface AdminBrief {
 }
 
 export default function AdminOverviewPage() {
-  const { complaints, total, loading, refetch } = useAdminComplaints();
+  const { complaints, total, loading, error, refetch } = useAdminComplaints();
   const [brief, setBrief] = useState<AdminBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
 
@@ -79,6 +79,22 @@ export default function AdminOverviewPage() {
           <span>Refresh Operations</span>
         </button>
       </div>
+
+      {/* Error Alert Banner if Server Connection Failed */}
+      {error && (
+        <div className="card p-6 bg-[#181111] border-[#E10600]/30 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+          <div className="flex items-center gap-3 text-left">
+            <AlertTriangle className="w-6 h-6 text-[#E10600] flex-shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-white">Database Sync Warning: Unable to load live complaints</p>
+              <p className="text-xs text-white/50 mt-0.5">{error}</p>
+            </div>
+          </div>
+          <button onClick={handleRefreshAll} className="btn-primary py-2 px-4 text-xs font-semibold flex-shrink-0">
+            Retry Connection
+          </button>
+        </div>
+      )}
 
       {/* ── AI Daily Civic Brief Banner ─────────────────────────────────── */}
       <div className="card p-6 bg-[#0E0E0E] border-white/10 rounded-3xl relative overflow-hidden shadow-2xl">
