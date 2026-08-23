@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   MessageSquare, X, Send, Bot, User, Loader2,
   PlusCircle, Minimize2, RotateCcw,
@@ -10,6 +11,7 @@ import { useAuth } from '../hooks/useAuth';
 import type { ChatMessage } from '../types';
 import { useNavigate, useLocation } from 'react-router-dom';
 import EagleEyeLogo from './EagleEyeLogo';
+import { buttonGestures } from '../utils/motion';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface EnhancedMessage extends ChatMessage {
@@ -207,18 +209,22 @@ const AIChat: React.FC = () => {
       </button>
 
       {/* ── Chat panel ───────────────────────────────────────── */}
-      {open && (
-        <div
-          className="fixed bottom-6 right-6 z-50 flex flex-col rounded-2xl overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.7)] border border-white/10"
-          style={{
-            width: 'min(380px, calc(100vw - 24px))',
-            height: minimized ? 'auto' : 'min(560px, calc(100vh - 100px))',
-            background: '#111',
-            animation: 'chatSlideUp 0.25s ease-out',
-          }}
-        >
-          {/* Top accent */}
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-[#E10600] to-transparent flex-shrink-0" />
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.94, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.94, y: 20 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+            className="fixed bottom-6 right-6 z-50 flex flex-col rounded-2xl overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.7)] border border-white/10"
+            style={{
+              width: 'min(380px, calc(100vw - 24px))',
+              height: minimized ? 'auto' : 'min(560px, calc(100vh - 100px))',
+              background: '#111',
+            }}
+          >
+            {/* Top accent */}
+            <div className="h-px w-full bg-gradient-to-r from-transparent via-[#E10600] to-transparent flex-shrink-0" />
 
           {/* ── Header ───────────────────────────────────────── */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#0D0D0D] flex-shrink-0">
@@ -491,16 +497,9 @@ const AIChat: React.FC = () => {
               <div className="ml-auto w-2 h-2 bg-[#22C55E] rounded-full animate-pulse" />
             </div>
           )}
-        </div>
-      )}
-
-      {/* Animation keyframes */}
-      <style>{`
-        @keyframes chatSlideUp {
-          from { opacity: 0; transform: translateY(12px) scale(0.98); }
-          to   { opacity: 1; transform: translateY(0)   scale(1); }
-        }
-      `}</style>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 };

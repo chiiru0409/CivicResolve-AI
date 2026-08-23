@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { motion } from 'motion/react';
 import { CheckCircle, Copy, Search, ArrowRight, Clock, Building2, MapPin, Zap } from 'lucide-react';
 import { getComplaintById } from '../services/complaintService';
 import PriorityBadge from '../components/PriorityBadge';
 import StatusBadge from '../components/StatusBadge';
 import type { Complaint } from '../types';
 import { useToast, ToastContainer } from '../components/Toast';
+import PageTransition from '../components/PageTransition';
+import { buttonGestures, cardGestures } from '../utils/motion';
 
 const SuccessPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -30,7 +33,7 @@ const SuccessPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070707] pt-20 pb-12 flex items-center">
+    <PageTransition className="min-h-screen bg-[#070707] pt-20 pb-12 flex items-center">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       <div className="max-w-lg w-full mx-auto px-4">
@@ -38,29 +41,40 @@ const SuccessPage: React.FC = () => {
         {/* Success header */}
         <div className="text-center mb-8">
           <div className="relative inline-flex mb-4">
-            <div className="w-20 h-20 bg-[#22C55E]/10 border-2 border-[#22C55E]/30 rounded-full flex items-center justify-center">
+            <motion.div
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', damping: 14, stiffness: 200 }}
+              className="w-20 h-20 bg-[#22C55E]/10 border-2 border-[#22C55E]/30 rounded-full flex items-center justify-center shadow-[0_0_25px_rgba(34,197,94,0.3)]"
+            >
               <CheckCircle className="w-10 h-10 text-[#22C55E]" />
-            </div>
+            </motion.div>
           </div>
-          <h1 className="text-3xl font-black text-white mb-2">Complaint Registered!</h1>
-          <p className="text-white/50">
+          <h1 className="text-3xl font-black text-white mb-2 font-display">Complaint Registered!</h1>
+          <p className="text-white/50 font-sans">
             Your complaint has been analyzed and routed to the appropriate authority.
           </p>
         </div>
 
         {/* Complaint ID card */}
-        <div className="relative bg-[#111] border border-white/8 rounded-2xl mb-5 p-6 text-center overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600] to-transparent" />
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15, duration: 0.4 }}
+          className="relative bg-[#111] border border-white/8 rounded-2xl mb-5 p-6 text-center overflow-hidden shadow-2xl"
+        >
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#E10600] to-transparent" />
           <div className="flex items-center justify-between mb-2">
             <span className="telemetry-chip-red">[ PERMANENT RECORD ]</span>
             <span className="text-[10px] font-mono text-white/30">STATUS: QUEUED</span>
           </div>
-          <p className="text-xs text-white/40 mb-2 uppercase tracking-widest font-bold">Your Complaint ID</p>
+          <p className="text-xs text-white/40 mb-2 uppercase tracking-widest font-bold font-mono">Your Complaint ID</p>
           <div className="flex items-center justify-center gap-3">
             <span className="text-3xl font-black font-mono text-[#E10600] tracking-wider">{id}</span>
-            <button
+            <motion.button
+              {...buttonGestures}
               onClick={handleCopy}
-              className={`p-2 rounded-xl transition-all ${
+              className={`p-2 rounded-xl transition-colors ${
                 copied
                   ? 'bg-[#22C55E]/10 text-[#22C55E]'
                   : 'bg-white/5 text-white/40 hover:text-white'
@@ -68,16 +82,21 @@ const SuccessPage: React.FC = () => {
               title="Copy ID"
             >
               {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            </button>
+            </motion.button>
           </div>
-          <p className="text-xs text-[#E10600] mt-2 font-semibold">Save this ID to track your complaint</p>
-        </div>
+          <p className="text-xs text-[#E10600] mt-2 font-semibold font-mono">Save this ID to track your complaint</p>
+        </motion.div>
 
         {/* Complaint details */}
         {complaint && (
-          <div className="bg-[#111] border border-white/8 rounded-2xl mb-5 p-6">
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25, duration: 0.4 }}
+            className="bg-[#111] border border-white/8 rounded-2xl mb-5 p-6 shadow-xl"
+          >
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-white flex items-center gap-2">
+              <h2 className="font-bold text-white flex items-center gap-2 font-display">
                 <Zap className="w-4 h-4 text-[#FFC400]" />
                 Complaint Summary
               </h2>
@@ -94,7 +113,7 @@ const SuccessPage: React.FC = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <span className="text-[10px] font-mono text-white/40 block">INCIDENT GPS LOCK</span>
-                  <span className="text-xs font-semibold text-white truncate block">{complaint.location}</span>
+                  <span className="text-xs font-semibold text-white truncate block font-display">{complaint.location}</span>
                 </div>
               </div>
             )}
@@ -103,11 +122,11 @@ const SuccessPage: React.FC = () => {
               {[
                 {
                   label: 'Title',
-                  value: <span className="text-sm font-medium text-white text-right max-w-[60%] truncate">{complaint.title}</span>,
+                  value: <span className="text-sm font-medium text-white text-right max-w-[60%] truncate font-display">{complaint.title}</span>,
                 },
                 {
                   label: 'Category',
-                  value: <span className="text-sm font-semibold text-white">{complaint.category}</span>,
+                  value: <span className="text-sm font-semibold text-white font-mono">{complaint.category}</span>,
                 },
                 {
                   label: 'Priority',
@@ -116,7 +135,7 @@ const SuccessPage: React.FC = () => {
                 {
                   label: 'Department',
                   value: (
-                    <span className="text-sm font-medium text-white text-right max-w-[60%] flex items-center gap-1">
+                    <span className="text-sm font-medium text-white text-right max-w-[60%] flex items-center gap-1 font-display">
                       <Building2 className="w-3.5 h-3.5 text-[#FFC400] flex-shrink-0" />
                       {complaint.department}
                     </span>
@@ -129,7 +148,7 @@ const SuccessPage: React.FC = () => {
                 {
                   label: 'Location',
                   value: (
-                    <span className="text-sm font-medium text-white text-right max-w-[60%] flex items-center gap-1">
+                    <span className="text-sm font-medium text-white text-right max-w-[60%] flex items-center gap-1 font-sans">
                       <MapPin className="w-3.5 h-3.5 text-[#E10600] flex-shrink-0" />
                       {complaint.location}
                     </span>
@@ -138,7 +157,7 @@ const SuccessPage: React.FC = () => {
                 {
                   label: 'Est. Response',
                   value: (
-                    <span className="text-sm font-bold text-[#FFC400] flex items-center gap-1">
+                    <span className="text-sm font-bold text-[#FFC400] flex items-center gap-1 font-mono">
                       <Clock className="w-3.5 h-3.5" />
                       {complaint.estimatedResponse ?? '48–72 hours'}
                     </span>
@@ -149,39 +168,48 @@ const SuccessPage: React.FC = () => {
                   key={i}
                   className="flex justify-between items-center py-2 border-b border-white/8 last:border-0"
                 >
-                  <span className="text-sm text-white/40 flex-shrink-0">{label}</span>
+                  <span className="text-sm text-white/40 flex-shrink-0 font-mono">{label}</span>
                   {value}
                 </div>
               ))}
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* Actions */}
         <div className="space-y-3">
-          <Link
-            to={`/track?id=${id}`}
-            className="btn-primary w-full justify-center py-3.5 text-sm font-bold shadow-sm hover:shadow active:scale-[0.98] transition-all duration-150"
-          >
-            <Search className="w-4 h-4" />
-            Track Complaint
-            <ArrowRight className="w-4 h-4" />
+          <Link to={`/track?id=${id}`} className="block">
+            <motion.div
+              {...buttonGestures}
+              className="btn-primary w-full justify-center py-3.5 text-sm font-bold shadow-lg shadow-[#E10600]/20 font-display flex items-center gap-2"
+            >
+              <Search className="w-4 h-4" />
+              <span>Track Complaint</span>
+              <ArrowRight className="w-4 h-4" />
+            </motion.div>
           </Link>
           <div className="grid grid-cols-2 gap-3">
-            <Link to="/report" className="btn-secondary justify-center py-3">
-              Report Another
+            <Link to="/report" className="block">
+              <motion.div {...buttonGestures} className="btn-secondary justify-center py-3 font-mono text-center">
+                Report Another
+              </motion.div>
             </Link>
-            <button onClick={handleCopy} className="btn-secondary justify-center py-3">
+            <motion.button {...buttonGestures} onClick={handleCopy} className="btn-secondary justify-center py-3 font-mono">
               <Copy className="w-4 h-4" />
-              Copy ID
-            </button>
+              <span>Copy ID</span>
+            </motion.button>
           </div>
         </div>
 
         {/* What's next */}
-        <div className="mt-6 bg-[#111] border border-[#FFC400]/15 rounded-2xl p-5 relative overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
+          className="mt-6 bg-[#111] border border-[#FFC400]/15 rounded-2xl p-5 relative overflow-hidden shadow-lg"
+        >
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#FFC400]/40 to-transparent" />
-          <h3 className="font-bold text-[#FFC400] text-sm mb-3 flex items-center gap-2">
+          <h3 className="font-bold text-[#FFC400] text-sm mb-3 flex items-center gap-2 font-display">
             <Zap className="w-4 h-4" />
             What happens next?
           </h3>
@@ -192,16 +220,16 @@ const SuccessPage: React.FC = () => {
               'Site inspection scheduled',
               "You'll be notified at each step",
             ].map((step, i) => (
-              <li key={i} className="flex items-center gap-2 text-sm text-white/50">
+              <li key={i} className="flex items-center gap-2 text-sm text-white/50 font-sans">
                 <CheckCircle className="w-3.5 h-3.5 text-[#22C55E] flex-shrink-0" />
                 {step}
               </li>
             ))}
           </ul>
-        </div>
+        </motion.div>
 
       </div>
-    </div>
+    </PageTransition>
   );
 };
 

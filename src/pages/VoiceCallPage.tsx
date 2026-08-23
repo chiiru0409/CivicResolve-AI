@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Phone,
   PhoneOff,
@@ -27,6 +28,7 @@ import {
   sendVoiceTurn,
   type VoiceTurnResponse,
 } from '../services/voiceService';
+import { buttonGestures, cardGestures } from '../utils/motion';
 
 interface TranscriptItem {
   sender: 'ai' | 'user';
@@ -252,9 +254,6 @@ export default function VoiceCallPage() {
         if (error === 'not-allowed') {
           setPermissionError('Microphone permission was denied. Please allow microphone access or use text input.');
           setShowTextInput(true);
-        } else if (error === 'no-speech') {
-          // If no speech detected in listening window, prompt gently
-          // only if user didn't speak
         }
       },
       () => {
@@ -322,7 +321,7 @@ export default function VoiceCallPage() {
               <div className="w-3 h-3 rounded-full bg-[#22C55E] animate-pulse" />
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black tracking-wide text-white uppercase">
+                  <span className="text-xs font-black tracking-wide text-white uppercase font-display">
                     CivicResolve AI Voice Helpline
                   </span>
                   <span className="telemetry-chip hidden sm:inline-flex">[ QWEN-2.5:3B ]</span>
@@ -338,29 +337,34 @@ export default function VoiceCallPage() {
                 <Clock className="w-3.5 h-3.5 text-[#FFC400]" />
                 <span>{formatCallTime(callDuration)}</span>
               </div>
-              <button
+              <motion.button
+                {...buttonGestures}
                 onClick={() => setAudioEnabled(!audioEnabled)}
-                className={`p-2 rounded-xl transition-all ${
+                className={`p-2 rounded-xl transition-colors ${
                   audioEnabled ? 'bg-white/5 text-white/70 hover:text-white' : 'bg-[#E10600]/20 text-[#E10600]'
                 }`}
                 title={audioEnabled ? 'Mute AI Voice' : 'Unmute AI Voice'}
               >
                 {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-              </button>
+              </motion.button>
             </div>
           </div>
 
           {/* ── Center Stage: Radar Visualizer & Status ────────────────── */}
           <div className="bg-[#0D0D0D] border border-white/10 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center relative overflow-hidden min-h-[280px] shadow-2xl">
             {/* Top red specular line */}
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600]/50 to-transparent" />
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#E10600]/50 to-transparent" />
 
             {/* Concentric Animated Voice Rings */}
             <div className="relative flex items-center justify-center my-4">
               {/* Outer pulsing ring for AI speaking */}
               {isAiSpeaking && (
                 <>
-                  <div className="absolute w-36 h-36 rounded-full bg-[#E10600]/20 animate-ping" />
+                  <motion.div
+                    animate={{ scale: [1, 1.8], opacity: [0.6, 0] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeOut' }}
+                    className="absolute w-36 h-36 rounded-full bg-[#E10600]/30"
+                  />
                   <div className="absolute w-48 h-48 rounded-full border border-[#E10600]/30 animate-pulse" />
                 </>
               )}
@@ -368,29 +372,35 @@ export default function VoiceCallPage() {
               {/* Outer pulsing ring for Citizen speaking */}
               {isUserListening && (
                 <>
-                  <div className="absolute w-36 h-36 rounded-full bg-[#22C55E]/20 animate-ping" />
+                  <motion.div
+                    animate={{ scale: [1, 1.8], opacity: [0.6, 0] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeOut' }}
+                    className="absolute w-36 h-36 rounded-full bg-[#22C55E]/30"
+                  />
                   <div className="absolute w-48 h-48 rounded-full border border-[#22C55E]/40 animate-pulse" />
                 </>
               )}
 
               {/* Core Avatar Button */}
-              <div
-                className={`w-24 h-24 rounded-full flex items-center justify-center relative z-10 transition-all duration-300 shadow-2xl ${
+              <motion.div
+                animate={isAiSpeaking ? { scale: [1, 1.06, 1] } : isUserListening ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+                className={`w-24 h-24 rounded-full flex items-center justify-center relative z-10 transition-colors duration-300 shadow-2xl ${
                   isAiSpeaking
-                    ? 'bg-gradient-to-tr from-[#E10600] to-[#FFC400] text-white ring-4 ring-[#E10600]/40 scale-105'
+                    ? 'bg-gradient-to-tr from-[#E10600] to-[#FFC400] text-white ring-4 ring-[#E10600]/40'
                     : isUserListening
-                    ? 'bg-gradient-to-tr from-[#22C55E] to-[#16A34A] text-white ring-4 ring-[#22C55E]/40 scale-105'
+                    ? 'bg-gradient-to-tr from-[#22C55E] to-[#16A34A] text-white ring-4 ring-[#22C55E]/40'
                     : 'bg-[#181818] border-2 border-white/20 text-white/60'
                 }`}
               >
                 {isAiSpeaking ? (
                   <Radio className="w-10 h-10 animate-pulse" />
                 ) : isUserListening ? (
-                  <Mic className="w-10 h-10 animate-bounce" />
+                  <Mic className="w-10 h-10" />
                 ) : (
                   <Sparkles className="w-10 h-10 text-[#FFC400]" />
                 )}
-              </div>
+              </motion.div>
             </div>
 
             {/* Dynamic Status Text Indicator */}
@@ -426,18 +436,18 @@ export default function VoiceCallPage() {
           </div>
 
           {/* ── Live Conversation Transcript Drawer ────────────────────── */}
-          <div className="bg-[#111] border border-white/10 rounded-2xl p-4 sm:p-5 max-h-56 overflow-y-auto space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-white/8 sticky top-0 bg-[#111]/95 backdrop-blur z-10">
-              <span className="text-[11px] font-mono uppercase text-white/40 font-bold">
+          <div className="bg-[#111] border border-white/10 rounded-2xl p-4 sm:p-5 max-h-56 overflow-y-auto space-y-3 shadow-xl">
+            <div className="flex items-center justify-between pb-2 border-b border-white/8 sticky top-0 bg-[#111]/95 backdrop-blur z-10 font-mono">
+              <span className="text-[11px] uppercase text-white/40 font-bold">
                 Live Call Transcript
               </span>
-              <span className="text-[10px] font-mono text-white/30">
+              <span className="text-[10px] text-white/30">
                 {transcript.length} turns recorded
               </span>
             </div>
 
             {transcript.length === 0 ? (
-              <p className="text-xs text-white/30 italic text-center py-4">
+              <p className="text-xs text-white/30 italic text-center py-4 font-sans">
                 Call started. The AI agent will begin speaking shortly...
               </p>
             ) : (
@@ -456,7 +466,7 @@ export default function VoiceCallPage() {
                     )}
                   </div>
                   <div className="flex-1 break-words">
-                    <p>{item.text}</p>
+                    <p className="font-sans">{item.text}</p>
                     <span className="text-[9px] font-mono text-white/20 block mt-0.5">{item.timestamp}</span>
                   </div>
                 </div>
@@ -467,38 +477,45 @@ export default function VoiceCallPage() {
 
           {/* ── Confirmed Complaint Registration Card ─────────────────── */}
           {createdComplaint && (
-            <div className="bg-[#22C55E]/10 border-2 border-[#22C55E]/30 rounded-2xl p-5 shadow-2xl animate-fadeIn">
-              <div className="flex items-start justify-between gap-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-[#22C55E]/10 border-2 border-[#22C55E]/30 rounded-2xl p-5 shadow-2xl shadow-[#22C55E]/10"
+            >
+              <div className="flex items-start justify-between gap-4 flex-wrap sm:flex-nowrap">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 bg-[#22C55E]/20 rounded-xl flex items-center justify-center flex-shrink-0">
                     <CheckCircle className="w-6 h-6 text-[#22C55E]" />
                   </div>
                   <div>
-                    <span className="text-[10px] font-black uppercase text-[#22C55E] tracking-wider">
+                    <span className="text-[10px] font-black uppercase text-[#22C55E] tracking-wider font-mono">
                       ✓ Complaint Officially Registered via Voice
                     </span>
-                    <h3 className="text-base font-black text-white mt-0.5">
+                    <h3 className="text-base font-black text-white mt-0.5 font-mono">
                       {createdComplaint.complaint_number}
                     </h3>
-                    <p className="text-xs text-white/60 mt-1">
-                      Category: <strong>{createdComplaint.category}</strong> · Department: <strong>{createdComplaint.department}</strong>
+                    <p className="text-xs text-white/60 mt-1 font-sans">
+                      Category: <strong className="text-white font-mono">{createdComplaint.category}</strong> · Department: <strong className="text-white font-display">{createdComplaint.department}</strong>
                     </p>
                   </div>
                 </div>
 
                 <Link
                   to={`/track?id=${createdComplaint.complaint_number}`}
-                  className="btn-primary text-xs py-2 px-4 whitespace-nowrap flex-shrink-0"
+                  className="flex-shrink-0"
                 >
-                  Track Status <ArrowRight className="w-3.5 h-3.5" />
+                  <motion.div {...buttonGestures} className="btn-primary text-xs py-2 px-4 whitespace-nowrap font-mono flex items-center gap-1.5">
+                    <span>Track Status</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </motion.div>
                 </Link>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ── Microphone / Permission Alerts ────────────────────────── */}
           {permissionError && (
-            <div className="bg-[#FFC400]/10 border border-[#FFC400]/20 rounded-xl p-3.5 flex items-center gap-3 text-xs text-[#FFC400]">
+            <div className="bg-[#FFC400]/10 border border-[#FFC400]/20 rounded-xl p-3.5 flex items-center gap-3 text-xs text-[#FFC400] font-mono">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <p className="flex-1">{permissionError}</p>
             </div>
@@ -512,26 +529,28 @@ export default function VoiceCallPage() {
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
                 placeholder="Type your response here..."
-                className="input-field flex-1"
+                className="input-field flex-1 font-sans"
                 disabled={isProcessing}
               />
-              <button
+              <motion.button
+                {...buttonGestures}
                 type="submit"
                 disabled={!manualText.trim() || isProcessing}
-                className="btn-primary px-4 py-2 text-xs"
+                className="btn-primary px-4 py-2 text-xs font-mono"
               >
                 <Send className="w-4 h-4" />
-              </button>
+              </motion.button>
             </form>
           )}
 
           {/* ── Bottom Call Control Dock ───────────────────────────────── */}
           <div className="bg-[#111] border border-white/10 rounded-2xl p-4 flex items-center justify-between shadow-2xl">
             {/* Left: Keyboard text toggle */}
-            <button
+            <motion.button
+              {...buttonGestures}
               type="button"
               onClick={() => setShowTextInput(!showTextInput)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors font-mono ${
                 showTextInput
                   ? 'bg-[#E10600]/15 text-[#E10600] border-[#E10600]/30'
                   : 'bg-white/5 text-white/60 hover:text-white border-white/10'
@@ -539,11 +558,12 @@ export default function VoiceCallPage() {
             >
               <MessageSquare className="w-4 h-4" />
               <span className="hidden sm:inline">{showTextInput ? 'Hide Text Input' : 'Type Response'}</span>
-            </button>
+            </motion.button>
 
             {/* Center: Push to Speak / Mic Toggle */}
             <div className="flex items-center gap-3">
-              <button
+              <motion.button
+                {...buttonGestures}
                 type="button"
                 onClick={() => {
                   if (isUserListening) {
@@ -553,17 +573,18 @@ export default function VoiceCallPage() {
                     startCitizenListening(stage, extractedData);
                   }
                 }}
-                className={`p-3.5 rounded-2xl flex items-center justify-center transition-all duration-200 ${
+                className={`p-3.5 rounded-2xl flex items-center justify-center transition-colors ${
                   isUserListening
-                    ? 'bg-[#22C55E] text-white shadow-[0_0_20px_rgba(34,197,94,0.5)] scale-105'
+                    ? 'bg-[#22C55E] text-white shadow-[0_0_20px_rgba(34,197,94,0.5)]'
                     : 'bg-white/10 text-white hover:bg-white/15'
                 }`}
                 title={isUserListening ? 'Stop Listening' : 'Speak Now (Push to Talk)'}
               >
                 {isUserListening ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
+                {...buttonGestures}
                 type="button"
                 onClick={() => {
                   setIsMuted(!isMuted);
@@ -571,7 +592,7 @@ export default function VoiceCallPage() {
                     recognitionRef.current?.stopListening();
                   }
                 }}
-                className={`p-3.5 rounded-2xl border transition-all ${
+                className={`p-3.5 rounded-2xl border transition-colors ${
                   isMuted
                     ? 'bg-[#E10600]/20 text-[#E10600] border-[#E10600]/40'
                     : 'bg-white/5 text-white/60 hover:text-white border-white/10'
@@ -579,18 +600,19 @@ export default function VoiceCallPage() {
                 title={isMuted ? 'Unmute Mic' : 'Mute Mic'}
               >
                 {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-              </button>
+              </motion.button>
             </div>
 
             {/* Right: End Call Button */}
-            <button
+            <motion.button
+              {...buttonGestures}
               type="button"
               onClick={handleEndCall}
-              className="flex items-center gap-2 bg-[#E10600] hover:bg-[#C90000] text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-all active:scale-95"
+              className="flex items-center gap-2 bg-[#E10600] hover:bg-[#C90000] text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-colors font-display"
             >
               <PhoneOff className="w-4 h-4" />
               <span>End Call</span>
-            </button>
+            </motion.button>
           </div>
 
         </div>

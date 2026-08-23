@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle, Loader2, ArrowRight, Edit3,
   AlertCircle, MapPin, Building2, Zap, AlertTriangle, ShieldCheck
@@ -8,6 +9,9 @@ import { analyzeComplaint } from '../services/aiService';
 import { submitComplaint, checkDuplicateComplaint } from '../services/complaintService';
 import PriorityBadge from '../components/PriorityBadge';
 import type { AIAnalysis } from '../types';
+import PageTransition from '../components/PageTransition';
+import { StaggerContainer, StaggerItem } from '../components/StaggerContainer';
+import { cardGestures, buttonGestures } from '../utils/motion';
 
 // ── Processing steps ─────────────────────────────────────────
 interface Step { label: string; done: boolean; active: boolean }
@@ -110,232 +114,275 @@ const AIAnalysisPage: React.FC = () => {
     }
   };
 
-  // ── Processing ───────────────────────────────────────────────
-  if (phase === 'processing') {
-    const progress = steps.filter((s) => s.done).length;
-
-    return (
-      <div className="min-h-screen bg-[#070707] pt-20 flex items-center justify-center">
-        <div className="max-w-md w-full mx-auto px-4">
-          <div className="card text-center">
-            {/* AI processing icon */}
-            <div className="relative w-16 h-16 mx-auto mb-5">
-              <div className="w-16 h-16 bg-white/5 border border-[#E10600]/30 rounded-2xl flex items-center justify-center">
-                <Zap className="w-8 h-8 text-[#E10600] animate-pulse" />
-              </div>
-            </div>
-
-            <h2 className="text-2xl font-black text-white mb-1 font-display">
-              <span>CIVIC</span>
-              <span className="text-[#E10600]">RESOLVE</span>
-              <span className="text-[#FFC400] text-lg"> AI</span>
-            </h2>
-            <p className="text-white/50 mb-2 text-sm">Synthesizing intelligence & routing telemetry…</p>
-
-            {/* Progress bar */}
-            <div className="w-full bg-white/10 rounded-full h-1.5 mb-6 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#E10600] to-[#FFC400] rounded-full transition-all duration-500"
-                style={{ width: `${(progress / steps.length) * 100}%` }}
-              />
-            </div>
-
-            {/* Steps */}
-            <div className="space-y-2.5 text-left">
-              {steps.map((step, i) => (
-                <div
-                  key={i}
-                  className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-300 ${
-                    step.done
-                      ? 'bg-[#E10600]/5 border border-[#E10600]/20'
-                      : step.active
-                      ? 'bg-[#FFC400]/5 border border-[#FFC400]/30'
-                      : 'bg-white/3 border border-white/6 opacity-40'
-                  }`}
-                >
-                  <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center">
-                    {step.done ? (
-                      <CheckCircle className="w-5 h-5 text-[#E10600]" />
-                    ) : step.active ? (
-                      <Loader2 className="w-5 h-5 text-[#FFC400] animate-spin" />
-                    ) : (
-                      <div className="w-2 h-2 rounded-full bg-white/20" />
-                    )}
-                  </div>
-                  <span className={`text-sm font-medium ${
-                    step.done ? 'text-[#E10600]' : step.active ? 'text-[#FFC400]' : 'text-white/30'
-                  }`}>
-                    {step.label}
-                  </span>
-                  {step.active && (
-                    <span className="ml-auto text-[10px] bg-[#FFC400]/10 text-[#FFC400] px-2 py-0.5 rounded-full border border-[#FFC400]/30 font-bold animate-pulse font-mono">
-                      ANALYZING
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Error ────────────────────────────────────────────────────
-  if (phase === 'error') {
-    return (
-      <div className="min-h-screen bg-[#070707] pt-20 flex items-center justify-center">
-        <div className="max-w-md w-full mx-auto px-4 text-center">
-          <div className="card">
-            <AlertCircle className="w-12 h-12 text-[#E10600] mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-white mb-2">Analysis Failed</h2>
-            <p className="text-white/50 mb-6">There was an error analyzing your complaint. Please verify your connection and try again.</p>
-            <button onClick={() => navigate('/report')} className="btn-primary justify-center w-full">
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Analysis Result ──────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#070707] pt-20 pb-12">
-      <div className="max-w-2xl mx-auto px-4 sm:px-6">
+    <PageTransition className="min-h-screen bg-[#070707] pt-20 pb-12">
+      <AnimatePresence mode="wait">
+        {/* ── Processing Phase ─────────────────────────────────────── */}
+        {phase === 'processing' && (
+          <motion.div
+            key="processing"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.3 }}
+            className="flex items-center justify-center min-h-[70vh]"
+          >
+            <div className="max-w-md w-full mx-auto px-4">
+              <div className="card text-center shadow-2xl">
+                {/* AI processing icon */}
+                <div className="relative w-16 h-16 mx-auto mb-5">
+                  <motion.div
+                    animate={{ rotate: [0, 360] }}
+                    transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
+                    className="absolute inset-0 rounded-2xl border border-[#E10600]/40 shadow-[0_0_15px_rgba(225,6,0,0.3)]"
+                  />
+                  <div className="w-16 h-16 bg-white/5 border border-[#E10600]/30 rounded-2xl flex items-center justify-center">
+                    <Zap className="w-8 h-8 text-[#E10600] animate-pulse" />
+                  </div>
+                </div>
 
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 bg-[#22C55E]/10 border border-[#22C55E]/30 text-[#22C55E] text-sm font-bold px-4 py-2 rounded-full mb-4">
-            <CheckCircle className="w-4 h-4" />
-            AI Analysis Complete
-          </div>
-          <h1 className="text-3xl font-black text-white font-display">Intelligence Report</h1>
-          <p className="text-white/50 mt-2">Review the AI findings and confirm to submit</p>
-        </div>
+                <h2 className="text-2xl font-black text-white mb-1 font-display">
+                  <span>CIVIC</span>
+                  <span className="text-[#E10600]">RESOLVE</span>
+                  <span className="text-[#FFC400] text-lg font-mono"> AI</span>
+                </h2>
+                <p className="text-white/50 mb-2 text-sm font-sans">Synthesizing intelligence & routing telemetry…</p>
 
-        {duplicateInfo && (
-          <div className="bg-[#FFC400]/10 border border-[#FFC400]/30 rounded-2xl p-4 mb-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-[#FFC400] flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-bold text-[#FFC400]">Potential Duplicate Incident Detected</p>
-              <p className="text-xs text-white/80 mt-1 leading-relaxed">{duplicateInfo.explanation}</p>
-              <p className="text-[11px] text-white/50 mt-1">You may still proceed with submission if this represents a new recurrence or separate location.</p>
-            </div>
-          </div>
-        )}
+                {/* Progress bar */}
+                <div className="w-full bg-white/10 rounded-full h-1.5 mb-6 overflow-hidden">
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-[#E10600] to-[#FFC400] rounded-full"
+                    style={{ width: `${(steps.filter((s) => s.done).length / steps.length) * 100}%` }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
 
-        {analysis && (
-          <div className="space-y-4">
-            {/* AI Intelligence Card */}
-            <div className="relative bg-[#111] border border-[#E10600]/30 rounded-2xl p-6 overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600] to-transparent" />
-              <div className="relative">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-[#E10600]/10 border border-[#E10600]/30 rounded-xl flex items-center justify-center">
-                      <Zap className="w-5 h-5 text-[#E10600]" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-black text-white text-sm font-display">AI INTELLIGENCE REPORT</p>
-                        <span className="telemetry-chip-green">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
-                          VERIFIED
-                        </span>
+                {/* Steps */}
+                <div className="space-y-2.5 text-left">
+                  {steps.map((step, i) => (
+                    <motion.div
+                      key={i}
+                      layout
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all duration-300 ${
+                        step.done
+                          ? 'bg-[#E10600]/5 border border-[#E10600]/20'
+                          : step.active
+                          ? 'bg-[#FFC400]/5 border border-[#FFC400]/30'
+                          : 'bg-white/3 border border-white/6 opacity-40'
+                      }`}
+                    >
+                      <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center">
+                        {step.done ? (
+                          <CheckCircle className="w-5 h-5 text-[#E10600]" />
+                        ) : step.active ? (
+                          <Loader2 className="w-5 h-5 text-[#FFC400] animate-spin" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-white/20" />
+                        )}
                       </div>
-                      <p className="text-white/40 text-xs font-mono">AUTONOMOUS MUNICIPAL CLASSIFICATION</p>
+                      <span className={`text-sm font-medium ${
+                        step.done ? 'text-[#E10600]' : step.active ? 'text-[#FFC400]' : 'text-white/30'
+                      }`}>
+                        {step.label}
+                      </span>
+                      {step.active && (
+                        <span className="ml-auto text-[10px] bg-[#FFC400]/10 text-[#FFC400] px-2 py-0.5 rounded-full border border-[#FFC400]/30 font-bold animate-pulse font-mono">
+                          ANALYZING
+                        </span>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Error Phase ─────────────────────────────────────────── */}
+        {phase === 'error' && (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center justify-center min-h-[70vh]"
+          >
+            <div className="max-w-md w-full mx-auto px-4 text-center">
+              <div className="card shadow-2xl">
+                <AlertCircle className="w-12 h-12 text-[#E10600] mx-auto mb-4" />
+                <h2 className="text-xl font-bold text-white mb-2 font-display">Analysis Failed</h2>
+                <p className="text-white/50 mb-6 font-sans">There was an error analyzing your complaint. Please verify your connection and try again.</p>
+                <motion.button
+                  {...buttonGestures}
+                  onClick={() => navigate('/report')}
+                  className="btn-primary justify-center w-full font-mono"
+                >
+                  Try Again
+                </motion.button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Analysis Result Phase ───────────────────────────────── */}
+        {phase === 'result' && analysis && (
+          <motion.div
+            key="result"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            className="max-w-2xl mx-auto px-4 sm:px-6"
+          >
+            {/* Header */}
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center gap-2 bg-[#22C55E]/10 border border-[#22C55E]/30 text-[#22C55E] text-sm font-bold px-4 py-2 rounded-full mb-4 font-mono shadow-[0_0_12px_rgba(34,197,94,0.2)]">
+                <CheckCircle className="w-4 h-4" />
+                AI Analysis Complete
+              </div>
+              <h1 className="text-3xl font-black text-white font-display">Intelligence Report</h1>
+              <p className="text-white/50 mt-2 font-sans">Review the AI findings and confirm to submit</p>
+            </div>
+
+            {duplicateInfo && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-[#FFC400]/10 border border-[#FFC400]/30 rounded-2xl p-4 mb-4 flex items-start gap-3"
+              >
+                <AlertTriangle className="w-5 h-5 text-[#FFC400] flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-[#FFC400] font-display">Potential Duplicate Incident Detected</p>
+                  <p className="text-xs text-white/80 mt-1 leading-relaxed font-sans">{duplicateInfo.explanation}</p>
+                  <p className="text-[11px] text-white/50 mt-1 font-mono">You may still proceed with submission if this represents a new recurrence or separate location.</p>
+                </div>
+              </motion.div>
+            )}
+
+            <div className="space-y-4">
+              {/* AI Intelligence Card */}
+              <motion.div
+                {...cardGestures}
+                className="relative bg-[#111] border border-[#E10600]/30 rounded-3xl p-6 overflow-hidden shadow-2xl"
+              >
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#E10600] to-transparent" />
+                <div className="relative">
+                  <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-[#E10600]/10 border border-[#E10600]/30 rounded-xl flex items-center justify-center shadow-md">
+                        <Zap className="w-5 h-5 text-[#E10600]" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-black text-white text-sm font-display">AI INTELLIGENCE REPORT</p>
+                          <span className="telemetry-chip-green">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
+                            VERIFIED
+                          </span>
+                        </div>
+                        <p className="text-white/40 text-xs font-mono">AUTONOMOUS MUNICIPAL CLASSIFICATION</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-[#FFC400]/10 border border-[#FFC400]/30 px-3 py-1.5 rounded-xl">
+                      <span className="text-base font-black font-mono text-[#FFC400]">{analysis.confidence}%</span>
+                      <span className="text-[10px] font-mono text-[#FFC400] uppercase font-bold">CONFIDENCE</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 bg-[#FFC400]/10 border border-[#FFC400]/30 px-3 py-1.5 rounded-xl">
-                    <span className="text-base font-black font-mono text-[#FFC400]">{analysis.confidence}%</span>
-                    <span className="text-[10px] font-mono text-[#FFC400] uppercase font-bold">CONFIDENCE</span>
+
+                  <h3 className="text-lg font-bold text-white mb-2 font-display">{analysis.title}</h3>
+
+                  {/* Reasoning stream */}
+                  <div className="bg-[#181818] border border-white/8 rounded-2xl p-3.5 mt-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase text-white/40">AI Context Reasoning</span>
+                      <span className="text-[10px] font-mono text-[#FFC400]">AUTONOMOUS DISPATCH</span>
+                    </div>
+                    <p className="text-xs text-white/70 italic leading-relaxed font-sans">
+                      "{analysis.reason}"
+                    </p>
                   </div>
                 </div>
+              </motion.div>
 
-                <h3 className="text-lg font-bold text-white mb-2">{analysis.title}</h3>
-
-                {/* Reasoning stream */}
-                <div className="bg-[#181818] border border-white/8 rounded-xl p-3.5 mt-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-mono uppercase text-white/40">AI Context Reasoning</span>
-                    <span className="text-[10px] font-mono text-[#FFC400]">AUTONOMOUS DISPATCH</span>
+              {/* Details grid */}
+              <StaggerContainer className="grid grid-cols-2 gap-3">
+                <StaggerItem className="card">
+                  <p className="text-xs text-white/40 mb-1 uppercase tracking-wide font-semibold font-mono">Category</p>
+                  <p className="font-black text-white text-lg font-display">{analysis.category}</p>
+                </StaggerItem>
+                <StaggerItem className="card">
+                  <p className="text-xs text-white/40 mb-2 uppercase tracking-wide font-semibold font-mono">Priority</p>
+                  <PriorityBadge priority={analysis.priority} size="lg" />
+                </StaggerItem>
+                <StaggerItem className="card col-span-2">
+                  <div className="flex items-start gap-3">
+                    <Building2 className="w-5 h-5 text-[#FFC400] mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-white/40 mb-0.5 uppercase tracking-wide font-semibold font-mono">Responsible Department</p>
+                      <p className="font-bold text-white font-display">{analysis.department}</p>
+                      {analysis.assignedTeam && (
+                        <p className="text-xs text-[#FFC400] mt-0.5 font-mono">→ {analysis.assignedTeam}</p>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-white/70 italic leading-relaxed">
-                    "{analysis.reason}"
-                  </p>
-                </div>
+                </StaggerItem>
+                <StaggerItem className="card">
+                  <div className="flex items-start gap-2">
+                    <MapPin className="w-4 h-4 text-[#E10600] mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-white/40 mb-0.5 font-mono">Location</p>
+                      <p className="font-semibold text-white text-sm truncate font-display">{analysis.location}</p>
+                    </div>
+                  </div>
+                </StaggerItem>
+                <StaggerItem className="card">
+                  <div className="flex items-start gap-2">
+                    <Zap className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-white/40 mb-0.5 font-mono">Est. Response</p>
+                      <p className="font-bold text-[#FFC400] text-sm font-mono">{analysis.estimatedResponse}</p>
+                    </div>
+                  </div>
+                </StaggerItem>
+              </StaggerContainer>
+
+              {/* Action buttons */}
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <motion.button
+                  {...buttonGestures}
+                  onClick={() => navigate('/report')}
+                  className="btn-secondary justify-center py-4 font-mono font-bold"
+                >
+                  <Edit3 className="w-5 h-5" />
+                  <span>Edit Details</span>
+                </motion.button>
+                <motion.button
+                  {...buttonGestures}
+                  onClick={handleConfirm}
+                  disabled={submitting}
+                  className="btn-primary justify-center py-4 text-sm font-bold glow-red font-display"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Submitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Confirm & Submit</span>
+                      <ArrowRight className="w-5 h-5" />
+                    </>
+                  )}
+                </motion.button>
               </div>
+
+              <p className="text-xs text-white/40 text-center font-sans">
+                By confirming, your complaint will be permanently stored and routed to municipal field dispatch.
+              </p>
             </div>
-
-            {/* Details grid */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="card">
-                <p className="text-xs text-white/40 mb-1 uppercase tracking-wide font-semibold">Category</p>
-                <p className="font-black text-white text-lg">{analysis.category}</p>
-              </div>
-              <div className="card">
-                <p className="text-xs text-white/40 mb-2 uppercase tracking-wide font-semibold">Priority</p>
-                <PriorityBadge priority={analysis.priority} size="lg" />
-              </div>
-              <div className="card col-span-2">
-                <div className="flex items-start gap-3">
-                  <Building2 className="w-5 h-5 text-[#FFC400] mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-white/40 mb-0.5 uppercase tracking-wide font-semibold">Responsible Department</p>
-                    <p className="font-bold text-white">{analysis.department}</p>
-                    {analysis.assignedTeam && (
-                      <p className="text-xs text-[#FFC400] mt-0.5">→ {analysis.assignedTeam}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="card">
-                <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-[#E10600] mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-white/40 mb-0.5">Location</p>
-                    <p className="font-semibold text-white text-sm truncate">{analysis.location}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="card">
-                <div className="flex items-start gap-2">
-                  <Zap className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-white/40 mb-0.5">Est. Response</p>
-                    <p className="font-bold text-[#FFC400] text-sm">{analysis.estimatedResponse}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <button onClick={() => navigate('/report')} className="btn-secondary justify-center py-4">
-                <Edit3 className="w-5 h-5" />
-                Edit Details
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={submitting}
-                className="btn-primary justify-center py-4 text-sm font-bold shadow-sm hover:shadow active:scale-[0.98] transition-all duration-150 glow-red"
-              >
-                {submitting ? (
-                  <><Loader2 className="w-5 h-5 animate-spin" />Submitting...</>
-                ) : (
-                  <>Confirm & Submit<ArrowRight className="w-5 h-5" /></>
-                )}
-              </button>
-            </div>
-
-            <p className="text-xs text-white/40 text-center">
-              By confirming, your complaint will be permanently stored and routed to municipal field dispatch.
-            </p>
-          </div>
+          </motion.div>
         )}
-      </div>
-    </div>
+      </AnimatePresence>
+    </PageTransition>
   );
 };
 

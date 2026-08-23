@@ -1,5 +1,8 @@
 import React from 'react';
+import { motion } from 'motion/react';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { cardGestures } from '../utils/motion';
+import AnimatedNumber from './AnimatedNumber';
 
 interface DashboardCardProps {
   title: string;
@@ -20,13 +23,21 @@ const colorMap = {
 
 const DashboardCard: React.FC<DashboardCardProps> = ({ title, value, subtitle, icon, color, trend }) => {
   const c = colorMap[color];
+  const isNumeric = typeof value === 'number' || (!isNaN(Number(value)) && typeof value === 'string');
+  const numValue = typeof value === 'number' ? value : Number(value);
 
   return (
-    <div className={`telemetry-card glass-panel-luxury p-5 rounded-2xl border border-white/8 hover:border-white/20 transition-all bg-gradient-to-br ${c.accent} to-transparent`}>
+    <motion.div
+      {...cardGestures}
+      className={`telemetry-card glass-panel-luxury p-5 rounded-2xl border border-white/8 hover:border-white/20 transition-colors bg-gradient-to-br ${c.accent} to-transparent cursor-default`}
+    >
       <div className="flex items-start justify-between mb-3">
-        <div className={`w-11 h-11 rounded-xl ${c.icon} flex items-center justify-center flex-shrink-0 border border-white/10 shadow-md`}>
+        <motion.div
+          whileHover={{ rotate: [0, -6, 6, 0], transition: { duration: 0.3 } }}
+          className={`w-11 h-11 rounded-xl ${c.icon} flex items-center justify-center flex-shrink-0 border border-white/10 shadow-md`}
+        >
           {icon}
-        </div>
+        </motion.div>
         {trend && (
           <div
             className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full font-mono ${
@@ -42,10 +53,12 @@ const DashboardCard: React.FC<DashboardCardProps> = ({ title, value, subtitle, i
           </div>
         )}
       </div>
-      <p className={`text-3xl sm:text-4xl font-black ${c.value} tabular-nums leading-none font-display tracking-tight`}>{value}</p>
+      <p className={`text-3xl sm:text-4xl font-black ${c.value} tabular-nums leading-none font-display tracking-tight`}>
+        {isNumeric ? <AnimatedNumber value={numValue} /> : value}
+      </p>
       <p className="text-xs sm:text-sm font-bold text-white mt-2 font-display">{title}</p>
       {subtitle && <p className="text-[11px] text-white/40 mt-0.5 font-mono">{subtitle}</p>}
-    </div>
+    </motion.div>
   );
 };
 

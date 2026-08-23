@@ -1,7 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { TrendingUp, Brain, BarChart2, Zap, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { api } from '../../services/api';
 import SkeletonCard from '../../components/SkeletonCard';
+import PageTransition from '../../components/PageTransition';
+import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
+import AnimatedNumber from '../../components/AnimatedNumber';
+import { cardGestures, buttonGestures } from '../../utils/motion';
 
 const BAR_COLORS: Record<string, string> = {
   Roads: '#E10600', Garbage: '#FFC400', Drainage: '#3B82F6',
@@ -15,16 +20,21 @@ const Bar: React.FC<{ data: { label: string; value: number }[]; maxVal?: number 
     <div className="space-y-3">
       {data.map((item) => (
         <div key={item.label} className="flex items-center gap-3">
-          <p className="text-sm text-white/50 w-28 flex-shrink-0 truncate">{item.label}</p>
-          <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${(item.value / max) * 100}%`, backgroundColor: BAR_COLORS[item.label] ?? '#E10600' }} />
+          <p className="text-sm text-white/50 w-28 flex-shrink-0 truncate font-display">{item.label}</p>
+          <div className="flex-1 bg-white/5 rounded-full h-2.5 overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${(item.value / max) * 100}%` }}
+              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+              className="h-full rounded-full"
+              style={{ backgroundColor: BAR_COLORS[item.label] ?? '#E10600' }}
+            />
           </div>
-          <p className="text-sm font-black text-white w-8 text-right tabular-nums">{item.value}</p>
+          <p className="text-sm font-black text-white w-8 text-right tabular-nums font-mono">{item.value}</p>
         </div>
       ))}
       {data.length === 0 && (
-        <p className="text-xs text-white/30 italic py-2">No category records in database yet.</p>
+        <p className="text-xs text-white/30 italic py-2 font-mono">No category records in database yet.</p>
       )}
     </div>
   );
@@ -83,20 +93,21 @@ export default function AdminAnalyticsPage() {
   const priData = (summary?.byPriority || []).map((x) => ({ label: x.priority, value: x.count }));
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <PageTransition className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-black text-white tracking-tight">Civic Operations Analytics</h1>
-          <p className="text-white/40 text-sm mt-0.5">Authoritative performance metrics grounded in Neon PostgreSQL records</p>
+          <h1 className="text-3xl font-black text-white tracking-tight font-display">Civic Operations Analytics</h1>
+          <p className="text-white/40 text-sm mt-0.5 font-sans">Authoritative performance metrics grounded in Neon PostgreSQL records</p>
         </div>
-        <button
+        <motion.button
+          {...buttonGestures}
           onClick={() => void loadAnalytics()}
           disabled={loading}
-          className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-3.5 py-2 rounded-xl transition-all"
+          className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-3.5 py-2 rounded-xl transition-colors font-mono"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#E10600]' : ''}`} />
           <span>Refresh</span>
-        </button>
+        </motion.button>
       </div>
 
       <div className="speed-line" />
@@ -117,86 +128,107 @@ export default function AdminAnalyticsPage() {
       ) : error ? (
         <div className="card text-center py-16 bg-[#111] border-white/10 rounded-3xl space-y-4 shadow-xl">
           <AlertTriangle className="w-10 h-10 text-[#FFC400] mx-auto" />
-          <p className="text-xl font-bold text-white">Unable to Load Operational Analytics</p>
-          <p className="text-white/50 text-sm max-w-md mx-auto">{error}</p>
-          <button
+          <p className="text-xl font-bold text-white font-display">Unable to Load Operational Analytics</p>
+          <p className="text-white/50 text-sm max-w-md mx-auto font-mono">{error}</p>
+          <motion.button
+            {...buttonGestures}
             onClick={() => void loadAnalytics()}
-            className="btn-primary py-2 px-4 text-xs font-bold inline-flex items-center gap-2"
+            className="btn-primary py-2 px-4 text-xs font-bold inline-flex items-center gap-2 font-mono"
           >
             <RefreshCw className="w-3.5 h-3.5" /> Retry Analytics Query
-          </button>
+          </motion.button>
         </div>
       ) : summary ? (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              { label: 'Total Complaints', value: summary.totalComplaints, color: 'text-white' },
-              { label: 'Resolved Tickets', value: summary.resolved,        color: 'text-[#22C55E]' },
-              { label: 'Resolution Rate',  value: `${summary.resolutionRate}%`, color: 'text-[#FFC400]' },
-              { label: 'Avg. Resolution',  value: `${summary.avgResolutionDays}d`, color: 'text-white/70' },
-            ].map((s) => (
-              <div key={s.label} className="telemetry-card">
-                <p className={`text-3xl font-black tabular-nums ${s.color}`}>{s.value}</p>
-                <p className="text-sm text-white/40 mt-1">{s.label}</p>
+          <StaggerContainer className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StaggerItem>
+              <div className="telemetry-card">
+                <p className="text-3xl font-black tabular-nums text-white font-display">
+                  <AnimatedNumber value={summary.totalComplaints} />
+                </p>
+                <p className="text-sm text-white/40 mt-1 font-mono">Total Complaints</p>
               </div>
-            ))}
-          </div>
+            </StaggerItem>
+            <StaggerItem>
+              <div className="telemetry-card">
+                <p className="text-3xl font-black tabular-nums text-[#22C55E] font-display">
+                  <AnimatedNumber value={summary.resolved} />
+                </p>
+                <p className="text-sm text-white/40 mt-1 font-mono">Resolved Tickets</p>
+              </div>
+            </StaggerItem>
+            <StaggerItem>
+              <div className="telemetry-card">
+                <p className="text-3xl font-black tabular-nums text-[#FFC400] font-display">
+                  <AnimatedNumber value={summary.resolutionRate} formatter={(v) => `${Math.round(v)}%`} />
+                </p>
+                <p className="text-sm text-white/40 mt-1 font-mono">Resolution Rate</p>
+              </div>
+            </StaggerItem>
+            <StaggerItem>
+              <div className="telemetry-card">
+                <p className="text-3xl font-black tabular-nums text-white/70 font-display">
+                  <AnimatedNumber value={summary.avgResolutionDays} formatter={(v) => `${v.toFixed(1)}d`} />
+                </p>
+                <p className="text-sm text-white/40 mt-1 font-mono">Avg. Resolution</p>
+              </div>
+            </StaggerItem>
+          </StaggerContainer>
 
           <div className="grid lg:grid-cols-2 gap-5">
-            <div className="card">
+            <motion.div {...cardGestures} className="card">
               <div className="flex items-center gap-2 mb-5">
                 <BarChart2 className="w-5 h-5 text-[#E10600]" />
-                <h2 className="font-black text-white">Incidents by Category</h2>
+                <h2 className="font-black text-white font-display">Incidents by Category</h2>
               </div>
               <Bar data={catData} />
-            </div>
-            <div className="card">
+            </motion.div>
+            <motion.div {...cardGestures} className="card">
               <div className="flex items-center gap-2 mb-5">
                 <BarChart2 className="w-5 h-5 text-[#FFC400]" />
-                <h2 className="font-black text-white">Incidents by Priority</h2>
+                <h2 className="font-black text-white font-display">Incidents by Priority</h2>
               </div>
               <Bar data={priData} />
-            </div>
+            </motion.div>
           </div>
 
           {/* AI recurring problems */}
           <div className="relative bg-[#111] border border-white/8 rounded-2xl p-6 overflow-hidden shadow-xl">
-            <div className="h-px w-full bg-gradient-to-r from-transparent via-[#FFC400]/40 to-transparent mb-5" />
+            <div className="h-0.5 w-full bg-gradient-to-r from-transparent via-[#FFC400]/40 to-transparent mb-5" />
             <div className="flex items-center gap-3 mb-5">
               <Brain className="w-5 h-5 text-[#FFC400]" />
-              <h2 className="font-black text-white">AI Pattern Detection & Anomaly Clusters</h2>
+              <h2 className="font-black text-white font-display">AI Pattern Detection & Anomaly Clusters</h2>
             </div>
-            <div className="space-y-4">
+            <StaggerContainer className="space-y-4">
               {summary.byCategory.filter((c) => c.count > 0).length > 0 ? (
                 summary.byCategory.filter((c) => c.count > 0).map((issue, i) => (
-                  <div key={i} className="bg-white/5 border border-white/8 rounded-xl p-4">
+                  <StaggerItem key={i} className="bg-white/5 border border-white/8 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="bg-[#E10600]/10 text-[#E10600] text-xs font-bold px-2.5 py-1 rounded-full border border-[#E10600]/20">
+                      <span className="bg-[#E10600]/10 text-[#E10600] text-xs font-bold px-2.5 py-1 rounded-full border border-[#E10600]/20 font-mono">
                         {issue.count} {issue.count === 1 ? 'case' : 'cases'} logged
                       </span>
-                      <span className="text-xs text-white/40">Category: {issue.category}</span>
+                      <span className="text-xs text-white/40 font-mono">Category: {issue.category}</span>
                     </div>
-                    <p className="font-bold text-white mb-2">Active {issue.category} Workload Cluster</p>
+                    <p className="font-bold text-white mb-2 font-display">Active {issue.category} Workload Cluster</p>
                     <div className="flex items-start gap-2 bg-[#FFC400]/5 border border-[#FFC400]/15 rounded-xl p-3">
                       <Zap className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
-                      <p className="text-sm text-white/60">
+                      <p className="text-sm text-white/60 font-sans">
                         {issue.count > 2
                           ? `Elevated incident volume in ${issue.category}. Recommend proactive field crew dispatch and preventative corridor review.`
                           : `Standard municipal maintenance queue for ${issue.category}. Service delivery operating within standard SLA.`}
                       </p>
                     </div>
-                  </div>
+                  </StaggerItem>
                 ))
               ) : (
-                <div className="bg-white/3 border border-white/8 rounded-xl p-8 text-center text-white/40 text-xs">
+                <div className="bg-white/3 border border-white/8 rounded-xl p-8 text-center text-white/40 text-xs font-mono">
                   No active complaint clusters detected. All municipal systems operating normally.
                 </div>
               )}
-            </div>
+            </StaggerContainer>
           </div>
         </>
       ) : null}
-    </div>
+    </PageTransition>
   );
 }
-

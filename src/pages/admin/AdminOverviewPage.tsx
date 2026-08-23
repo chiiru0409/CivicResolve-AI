@@ -13,6 +13,10 @@ import { useAdminComplaints } from '../../hooks/useComplaints';
 import { SkeletonStat } from '../../components/SkeletonCard';
 import { formatDateTime, getCategoryEmoji, truncate } from '../../utils/helpers';
 import { api } from '../../services/api';
+import PageTransition from '../../components/PageTransition';
+import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
+import { motion } from 'motion/react';
+import { cardGestures, buttonGestures } from '../../utils/motion';
 
 interface AdminBrief {
   total_complaints: number;
@@ -108,7 +112,7 @@ export default function AdminOverviewPage() {
   const hasFatalError = (error || overviewError) && !overview && complaints.length === 0;
 
   return (
-    <div className="p-6 lg:p-8 space-y-8 max-w-7xl mx-auto">
+    <PageTransition className="p-6 lg:p-8 space-y-8 max-w-7xl mx-auto">
       
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -117,52 +121,62 @@ export default function AdminOverviewPage() {
             <Shield className="w-3.5 h-3.5" />
             <span>Operations Command Center</span>
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight">Municipal Operations & Intelligence</h1>
-          <p className="text-white/40 text-sm mt-0.5">Real-time civic dispatch telemetry, AI routing, and workload management</p>
+          <h1 className="text-3xl font-black text-white tracking-tight font-display">Municipal Operations & Intelligence</h1>
+          <p className="text-white/40 text-sm mt-0.5 font-sans">Real-time civic dispatch telemetry, AI routing, and workload management</p>
         </div>
-        <button
+        <motion.button
+          {...buttonGestures}
           onClick={handleRefreshAll}
           disabled={loading || briefLoading || overviewLoading}
-          className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-xl hover:border-white/20 transition-all disabled:opacity-50 self-start sm:self-center glow-red-sm"
+          className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-xl hover:border-white/20 transition-colors disabled:opacity-50 self-start sm:self-center glow-red-sm font-mono"
         >
           <RefreshCw className={`w-4 h-4 ${(loading || briefLoading || overviewLoading) ? 'animate-spin text-[#E10600]' : ''}`} />
           <span>Refresh Operations</span>
-        </button>
+        </motion.button>
       </div>
 
       {/* Error Alert Banner if Server Connection Failed */}
       {(error || overviewError) && (
-        <div className="card p-4 bg-[#181111] border-[#E10600]/40 rounded-2xl flex items-center justify-between gap-4 shadow-xl">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="card p-4 bg-[#181111] border-[#E10600]/40 rounded-2xl flex items-center justify-between gap-4 shadow-xl"
+        >
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-[#E10600] flex-shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-white">Database Connection Alert</p>
-              <p className="text-xs text-white/60 mt-0.5">{error || overviewError}</p>
+              <p className="text-sm font-semibold text-white font-display">Database Connection Alert</p>
+              <p className="text-xs text-white/60 mt-0.5 font-mono">{error || overviewError}</p>
             </div>
           </div>
           <button
             onClick={handleRefreshAll}
-            className="btn-primary py-1.5 px-4 text-xs font-semibold flex-shrink-0"
+            className="btn-primary py-1.5 px-4 text-xs font-semibold flex-shrink-0 font-mono"
           >
             Retry Connection
           </button>
-        </div>
+        </motion.div>
       )}
 
       {/* ── AI Intelligence Brief Banner ─────────────────────────────────── */}
-      <div className="card p-6 bg-gradient-to-br from-[#120808] via-[#101010] to-[#0A0A0A] border-[#E10600]/30 rounded-2xl shadow-xl relative overflow-hidden">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="card p-6 bg-gradient-to-br from-[#120808] via-[#101010] to-[#0A0A0A] border-[#E10600]/30 rounded-2xl shadow-xl relative overflow-hidden"
+      >
         <div className="absolute top-0 right-0 w-96 h-96 bg-[#E10600]/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
         
         <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 relative z-10">
           <div className="space-y-3 flex-1">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-[#E10600]/15 border border-[#E10600]/30 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-[#E10600]/15 border border-[#E10600]/30 flex items-center justify-center shadow-[0_0_10px_rgba(225,6,0,0.2)]">
                 <Sparkles className="w-4 h-4 text-[#E10600]" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-black text-white">Daily AI Civic Intelligence Brief</h2>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                  <h2 className="text-base font-black text-white font-display">Daily AI Civic Intelligence Brief</h2>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider font-mono ${
                     brief?.urgency_level === 'CRITICAL' ? 'bg-[#E10600]/20 text-[#E10600] border border-[#E10600]/40 animate-pulse' :
                     brief?.urgency_level === 'HIGH' ? 'bg-[#FFC400]/20 text-[#FFC400] border border-[#FFC400]/40' :
                     'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
@@ -182,41 +196,41 @@ export default function AdminOverviewPage() {
             ) : brief ? (
               <p className="text-sm text-white/80 leading-relaxed font-sans">{brief.ai_summary}</p>
             ) : (
-              <p className="text-sm text-white/50">Municipal operations operating within normal parameters.</p>
+              <p className="text-sm text-white/50 font-sans">Municipal operations operating within normal parameters.</p>
             )}
 
             {/* Bullet Highlights */}
             {brief && brief.key_bullet_points && brief.key_bullet_points.length > 0 && (
-              <div className="grid sm:grid-cols-2 gap-2 pt-2">
+              <StaggerContainer className="grid sm:grid-cols-2 gap-2 pt-2">
                 {brief.key_bullet_points.map((pt, idx) => (
-                  <div key={idx} className="flex items-start gap-2 text-xs text-white/70 bg-white/3 border border-white/6 rounded-lg p-2.5">
+                  <StaggerItem key={idx} className="flex items-start gap-2 text-xs text-white/70 bg-white/3 border border-white/6 rounded-lg p-2.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#E10600] mt-1.5 flex-shrink-0" />
                     <span>{pt}</span>
-                  </div>
+                  </StaggerItem>
                 ))}
-              </div>
+              </StaggerContainer>
             )}
           </div>
 
           {/* Quick Metrics from Brief */}
           {brief && (
             <div className="flex sm:flex-col gap-3 flex-shrink-0 min-w-[200px]">
-              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
+              <motion.div {...cardGestures} className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
                 <p className="text-[10px] font-mono text-white/40 uppercase">Top Bottleneck Dept</p>
-                <p className="text-xs font-bold text-white mt-0.5 truncate">{brief.top_department}</p>
-              </div>
-              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
+                <p className="text-xs font-bold text-white mt-0.5 truncate font-display">{brief.top_department}</p>
+              </motion.div>
+              <motion.div {...cardGestures} className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
                 <p className="text-[10px] font-mono text-white/40 uppercase">Lead Category</p>
-                <p className="text-xs font-bold text-white mt-0.5">{brief.top_category} ({brief.category_counts?.[brief.top_category] || 0})</p>
-              </div>
-              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
+                <p className="text-xs font-bold text-white mt-0.5 font-display">{brief.top_category} ({brief.category_counts?.[brief.top_category] || 0})</p>
+              </motion.div>
+              <motion.div {...cardGestures} className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
                 <p className="text-[10px] font-mono text-white/40 uppercase">Aged &gt;48h Unresolved</p>
-                <p className="text-xs font-bold text-[#FFC400] mt-0.5">{brief.overdue_count} tickets</p>
-              </div>
+                <p className="text-xs font-bold text-[#FFC400] mt-0.5 font-mono">{brief.overdue_count} tickets</p>
+              </motion.div>
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* ── KPI Telemetry Cards ────────────────────────────────────────── */}
       {(loading || overviewLoading) && !overview && complaints.length === 0 ? (
@@ -226,43 +240,51 @@ export default function AdminOverviewPage() {
       ) : hasFatalError ? (
         <div className="bg-[#181111] border border-[#E10600]/40 rounded-3xl p-6 text-center space-y-3">
           <AlertTriangle className="w-8 h-8 text-[#E10600] mx-auto" />
-          <p className="text-sm font-bold text-white uppercase tracking-wider">DATABASE CONNECTION ERROR</p>
-          <p className="text-xs text-white/50">Unable to reach the authoritative PostgreSQL database. Retrying connection...</p>
-          <button onClick={handleRefreshAll} className="btn-primary py-2 px-4 text-xs font-bold inline-flex items-center gap-2">
+          <p className="text-sm font-bold text-white uppercase tracking-wider font-display">DATABASE CONNECTION ERROR</p>
+          <p className="text-xs text-white/50 font-mono">Unable to reach the authoritative PostgreSQL database. Retrying connection...</p>
+          <button onClick={handleRefreshAll} className="btn-primary py-2 px-4 text-xs font-bold inline-flex items-center gap-2 font-mono">
             <RefreshCw className="w-3.5 h-3.5" /> Reconnect Database
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <DashboardCard
-            title="Total Complaints"
-            value={totalCount}
-            subtitle="Database records"
-            icon={<ClipboardList className="w-6 h-6" />}
-            color="muted"
-          />
-          <DashboardCard
-            title="High Priority"
-            value={highCount}
-            subtitle="Urgent field response"
-            icon={<AlertTriangle className="w-6 h-6" />}
-            color="red"
-          />
-          <DashboardCard
-            title="Pending Actions"
-            value={pendingCount}
-            subtitle="Active workflows"
-            icon={<Clock className="w-6 h-6" />}
-            color="yellow"
-          />
-          <DashboardCard
-            title="Resolved"
-            value={resolvedCount}
-            subtitle="Closed out"
-            icon={<CheckCircle className="w-6 h-6" />}
-            color="green"
-          />
-        </div>
+        <StaggerContainer className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StaggerItem>
+            <DashboardCard
+              title="Total Complaints"
+              value={totalCount}
+              subtitle="Database records"
+              icon={<ClipboardList className="w-6 h-6" />}
+              color="muted"
+            />
+          </StaggerItem>
+          <StaggerItem>
+            <DashboardCard
+              title="High Priority"
+              value={highCount}
+              subtitle="Urgent field response"
+              icon={<AlertTriangle className="w-6 h-6" />}
+              color="red"
+            />
+          </StaggerItem>
+          <StaggerItem>
+            <DashboardCard
+              title="Pending Actions"
+              value={pendingCount}
+              subtitle="Active workflows"
+              icon={<Clock className="w-6 h-6" />}
+              color="yellow"
+            />
+          </StaggerItem>
+          <StaggerItem>
+            <DashboardCard
+              title="Resolved"
+              value={resolvedCount}
+              subtitle="Closed out"
+              icon={<CheckCircle className="w-6 h-6" />}
+              color="green"
+            />
+          </StaggerItem>
+        </StaggerContainer>
       )}
 
       {/* ── Admin AI Operations Copilot Section ─────────────────────────── */}
@@ -276,40 +298,41 @@ export default function AdminOverviewPage() {
           <div className="p-5 border-b border-white/8 bg-[#111] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-[#E10600]" />
-              <h2 className="font-black text-white text-sm tracking-wide">Priority Dispatch Queue</h2>
+              <h2 className="font-black text-white text-sm tracking-wide font-display">Priority Dispatch Queue</h2>
             </div>
-            <Link to="/admin/complaints?priority=HIGH" className="text-xs text-[#E10600] hover:text-[#FF1A14] font-bold flex items-center gap-1 transition-colors">
+            <Link to="/admin/complaints?priority=HIGH" className="text-xs text-[#E10600] hover:text-[#FF1A14] font-bold flex items-center gap-1 transition-colors font-mono">
               View all ({highPriorityCases.length}) <ChevronRight className="w-3 h-3" />
             </Link>
           </div>
 
-          <div className="divide-y divide-white/6 overflow-y-auto max-h-[380px]" style={{ scrollbarWidth: 'thin' }}>
+          <StaggerContainer className="divide-y divide-white/6 overflow-y-auto max-h-[380px]" style={{ scrollbarWidth: 'thin' }}>
             {highPriorityCases.slice(0, 5).map((c) => (
-              <Link
-                key={c.id}
-                to={`/admin/complaints/${c.id}`}
-                className="p-4 hover:bg-white/4 transition-colors flex items-center justify-between gap-3 group"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-white group-hover:text-[#E10600] transition-colors">{c.id}</span>
-                    <PriorityBadge priority={c.priority} size="sm" />
-                    <StatusBadge status={c.status} size="sm" />
+              <StaggerItem key={c.id}>
+                <Link
+                  to={`/admin/complaints/${c.id}`}
+                  className="p-4 hover:bg-white/4 transition-colors flex items-center justify-between gap-3 group block"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-white group-hover:text-[#E10600] transition-colors">{c.id}</span>
+                      <PriorityBadge priority={c.priority} size="sm" />
+                      <StatusBadge status={c.status} size="sm" />
+                    </div>
+                    <p className="text-xs font-semibold text-white/90 truncate mt-1">{c.title}</p>
+                    <p className="text-[11px] text-white/40 truncate">📍 {c.location || 'Location specified'}</p>
                   </div>
-                  <p className="text-xs font-semibold text-white/90 truncate mt-1">{c.title}</p>
-                  <p className="text-[11px] text-white/40 truncate">📍 {c.location || 'Location specified'}</p>
-                </div>
-                <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white transition-all flex-shrink-0" />
-              </Link>
+                  <ArrowRight className="w-4 h-4 text-white/20 group-hover:text-white transition-all flex-shrink-0" />
+                </Link>
+              </StaggerItem>
             ))}
             {highPriorityCases.length === 0 && !loading && (
               <div className="p-10 text-center text-white/40 text-xs space-y-2">
                 <CheckCircle className="w-8 h-8 text-[#22C55E]/60 mx-auto" />
-                <p className="font-semibold text-white/80">All Priority Cases Dispatched</p>
+                <p className="font-semibold text-white/80 font-display">All Priority Cases Dispatched</p>
                 <p className="text-white/40 text-[11px]">No unresolved high or critical priority incidents requiring immediate supervisor action.</p>
               </div>
             )}
-          </div>
+          </StaggerContainer>
         </div>
 
         {/* Live Incident Map */}
@@ -317,7 +340,7 @@ export default function AdminOverviewPage() {
           <div className="p-5 border-b border-white/8 bg-[#111] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-[#FFC400]" />
-              <h2 className="font-black text-white text-sm tracking-wide">Live Municipal Hotspot Map</h2>
+              <h2 className="font-black text-white text-sm tracking-wide font-display">Live Municipal Hotspot Map</h2>
             </div>
             <span className="text-[10px] font-mono text-white/40">GEO-SPATIAL CLUSTER TELEMETRY</span>
           </div>
@@ -343,6 +366,6 @@ export default function AdminOverviewPage() {
         </div>
       </div>
 
-    </div>
+    </PageTransition>
   );
 }

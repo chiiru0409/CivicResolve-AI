@@ -15,6 +15,10 @@ import type { Complaint, ComplaintStatus } from '../../types';
 import { useToast, ToastContainer } from '../../components/Toast';
 import { formatDateTime, getCategoryEmoji } from '../../utils/helpers';
 import SkeletonCard from '../../components/SkeletonCard';
+import PageTransition from '../../components/PageTransition';
+import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
+import { motion, AnimatePresence } from 'motion/react';
+import { buttonGestures, cardGestures } from '../../utils/motion';
 
 const STATUS_ACTIONS: ComplaintStatus[] = ['Assigned', 'In Progress', 'Inspection', 'Resolved', 'Closed'];
 
@@ -226,7 +230,7 @@ export default function AdminComplaintDetailPage() {
   const hasPhoto = Boolean(complaint.imageUrl && complaint.imageUrl.trim());
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <PageTransition className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       {/* Navigation Header */}
@@ -625,6 +629,6 @@ export default function AdminComplaintDetailPage() {
           <ComplaintLocationMap complaint={complaint} />
         </div>
       </div>
-    </div>
+    </PageTransition>
   );
 }

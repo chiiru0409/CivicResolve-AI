@@ -1,33 +1,36 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { pageVariants } from '../utils/motion';
 
 interface PageTransitionProps {
   children: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 /**
- * Lightweight page transition — CSS-only fade+slide.
- * No heavy animation library required.
+ * Premium Page Transition component powered by Motion for React.
+ * Provides subtle command-center entrance with opacity and spring-assisted translate.
+ * Respects user preferences for reduced motion automatically.
  */
-const PageTransition: React.FC<PageTransitionProps> = ({ children, className = '' }) => {
-  const ref = useRef<HTMLDivElement>(null);
+const PageTransition: React.FC<PageTransitionProps> = ({ children, className = '', style }) => {
+  const shouldReduceMotion = useReducedMotion();
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(8px)';
-    requestAnimationFrame(() => {
-      el.style.transition = 'opacity 300ms ease-out, transform 300ms ease-out';
-      el.style.opacity = '1';
-      el.style.transform = 'translateY(0)';
-    });
-  }, []);
+  if (shouldReduceMotion) {
+    return <div className={className} style={style}>{children}</div>;
+  }
 
   return (
-    <div ref={ref} className={className}>
+    <motion.div
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className={className}
+      style={style}
+    >
       {children}
-    </div>
+    </motion.div>
   );
 };
 

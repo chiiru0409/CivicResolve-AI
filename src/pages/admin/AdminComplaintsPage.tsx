@@ -10,6 +10,9 @@ import { useAdminComplaints } from '../../hooks/useComplaints';
 import { SkeletonTable } from '../../components/SkeletonCard';
 import { formatDateTime, getCategoryEmoji, truncate } from '../../utils/helpers';
 import { api } from '../../services/api';
+import PageTransition from '../../components/PageTransition';
+import { motion, AnimatePresence } from 'motion/react';
+import { modalVariants, backdropVariants, buttonGestures } from '../../utils/motion';
 
 const CATS = ['All', 'Roads', 'Garbage', 'Drainage', 'Water', 'Streetlights', 'Infrastructure', 'Other'];
 const PRIS = ['All', 'HIGH', 'MEDIUM', 'LOW'];
@@ -108,7 +111,7 @@ export default function AdminComplaintsPage() {
   const hasFilters = Boolean(search || cat !== 'All' || pri !== 'All' || stat !== 'All');
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <PageTransition className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <div>
         <div className="inline-flex items-center gap-2 text-xs font-mono text-[#FFC400] bg-[#FFC400]/10 border border-[#FFC400]/25 px-3 py-1 rounded-full mb-2 uppercase tracking-wider">
           <Shield className="w-3.5 h-3.5" />
@@ -255,132 +258,152 @@ export default function AdminComplaintsPage() {
       )}
 
       {/* ── AI Diagnostic Slide-Over Modal ─────────────────────────── */}
-      {selectedId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-[#111111] border border-white/12 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl relative">
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#E10600] via-[#FFC400] to-[#22C55E]" />
+      <AnimatePresence>
+        {selectedId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              variants={backdropVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="absolute inset-0 bg-black/80"
+              onClick={() => setSelectedId(null)}
+            />
             
-            {/* Modal Header */}
-            <div className="p-6 border-b border-white/8 flex items-center justify-between bg-[#151515]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-[#FFC400]/15 border border-[#FFC400]/30 flex items-center justify-center">
-                  <Sparkles className="w-4 h-4 text-[#FFC400]" />
-                </div>
-                <div>
-                  <h3 className="font-black text-white text-base">AI Incident Diagnostic</h3>
-                  <p className="font-mono text-xs text-[#FFC400]">{selectedId}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedId(null)}
-                className="p-2 rounded-xl text-white/40 hover:text-white hover:bg-white/8 transition-all"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-              {analysisLoading ? (
-                <div className="py-16 text-center space-y-3">
-                  <Loader2 className="w-8 h-8 text-[#E10600] animate-spin mx-auto" />
-                  <p className="text-sm text-white/50">Synthesizing deep AI diagnostic telemetry…</p>
-                </div>
-              ) : analysis ? (
-                <>
-                  <div className="bg-[#181818] border border-white/8 rounded-2xl p-4 space-y-1">
-                    <p className="text-xs text-white/40 font-mono uppercase">Incident Title</p>
-                    <p className="text-sm font-bold text-white">{analysis.title}</p>
+            <motion.div
+              variants={modalVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="bg-[#111111] border border-white/12 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl relative z-10"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#E10600] via-[#FFC400] to-[#22C55E]" />
+              
+              {/* Modal Header */}
+              <div className="p-6 border-b border-white/8 flex items-center justify-between bg-[#151515]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#FFC400]/15 border border-[#FFC400]/30 flex items-center justify-center shadow-[0_0_10px_rgba(255,196,0,0.2)]">
+                    <Sparkles className="w-4 h-4 text-[#FFC400]" />
                   </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
-                      <span className="text-[10px] font-mono uppercase text-white/40">Category</span>
-                      <p className="text-xs font-bold text-white mt-1">{analysis.category}</p>
-                    </div>
-                    <div className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
-                      <span className="text-[10px] font-mono uppercase text-white/40">Severity</span>
-                      <p className="text-xs font-bold text-[#E10600] mt-1">{analysis.severity} / 10</p>
-                    </div>
-                    <div className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
-                      <span className="text-[10px] font-mono uppercase text-white/40">Confidence</span>
-                      <p className="text-xs font-bold text-[#22C55E] mt-1">{analysis.ai_confidence}%</p>
-                    </div>
+                  <div>
+                    <h3 className="font-black text-white text-base font-display">AI Incident Diagnostic</h3>
+                    <p className="font-mono text-xs text-[#FFC400]">{selectedId}</p>
                   </div>
-
-                  <div className="space-y-3">
-                    <div className="bg-white/3 border border-white/6 rounded-2xl p-4 space-y-1">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#E10600]">
-                        <AlertTriangle className="w-4 h-4" />
-                        <span>Risk Assessment</span>
-                      </div>
-                      <p className="text-xs text-white/80 leading-relaxed">{analysis.risk_assessment}</p>
-                    </div>
-
-                    <div className="bg-white/3 border border-white/6 rounded-2xl p-4 space-y-1">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#FFC400]">
-                        <Clock className="w-4 h-4" />
-                        <span>Recommended Operational Action</span>
-                      </div>
-                      <p className="text-xs text-white/80 leading-relaxed">{analysis.recommended_action}</p>
-                    </div>
-                  </div>
-
-                  {analysis.similar_reports && analysis.similar_reports.length > 0 && (
-                    <div className="border-t border-white/8 pt-4 space-y-2">
-                      <p className="text-[11px] font-mono uppercase text-white/40">Similar Reports in Vicinity ({analysis.similar_reports_count})</p>
-                      <div className="space-y-1.5">
-                        {analysis.similar_reports.map((s) => (
-                          <div key={s.id} className="text-xs text-white/60 bg-white/4 border border-white/6 rounded-xl p-2.5 flex items-center justify-between">
-                            <span>{s.complaint_number || s.id} — {s.title}</span>
-                            <span className="font-mono text-[10px] text-[#FFC400]">{s.status}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : analysisError ? (
-                <div className="py-12 text-center space-y-3">
-                  <AlertTriangle className="w-8 h-8 text-[#FFC400] mx-auto" />
-                  <p className="text-sm font-bold text-white">AI Diagnostic Unavailable</p>
-                  <p className="text-xs text-white/50 max-w-sm mx-auto">{analysisError}</p>
-                  {selectedId && (
-                    <button
-                      onClick={() => void openAIDiagnostic(selectedId)}
-                      className="btn-primary py-2 px-3.5 text-xs font-bold inline-flex items-center gap-1.5"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" /> Retry AI Inspection
-                    </button>
-                  )}
                 </div>
-              ) : (
-                <div className="py-12 text-center text-white/40 text-sm">
-                  Failed to load diagnostic telemetry.
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-white/8 bg-[#151515] flex justify-end gap-2">
-              <button
-                onClick={() => setSelectedId(null)}
-                className="btn-secondary text-xs py-2 px-4"
-              >
-                Close
-              </button>
-              {selectedId && (
-                <Link
-                  to={`/admin/complaints/${selectedId}`}
-                  className="btn-primary text-xs py-2 px-4 glow-red-sm"
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(null)}
+                  className="p-2 rounded-xl text-white/40 hover:text-white hover:bg-white/8 transition-colors"
                 >
-                  Open Full Detail Record <ArrowUpRight className="w-3.5 h-3.5" />
-                </Link>
-              )}
-            </div>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                {analysisLoading ? (
+                  <div className="py-16 text-center space-y-3">
+                    <Loader2 className="w-8 h-8 text-[#E10600] animate-spin mx-auto" />
+                    <p className="text-sm text-white/50 font-mono">Synthesizing deep AI diagnostic telemetry…</p>
+                  </div>
+                ) : analysis ? (
+                  <>
+                    <div className="bg-[#181818] border border-white/8 rounded-2xl p-4 space-y-1">
+                      <p className="text-xs text-white/40 font-mono uppercase">Incident Title</p>
+                      <p className="text-sm font-bold text-white font-display">{analysis.title}</p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
+                        <span className="text-[10px] font-mono uppercase text-white/40">Category</span>
+                        <p className="text-xs font-bold text-white mt-1 font-display">{analysis.category}</p>
+                      </div>
+                      <div className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
+                        <span className="text-[10px] font-mono uppercase text-white/40">Severity</span>
+                        <p className="text-xs font-bold text-[#E10600] mt-1 font-mono">{analysis.severity} / 10</p>
+                      </div>
+                      <div className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
+                        <span className="text-[10px] font-mono uppercase text-white/40">Confidence</span>
+                        <p className="text-xs font-bold text-[#22C55E] mt-1 font-mono">{analysis.ai_confidence}%</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="bg-white/3 border border-white/6 rounded-2xl p-4 space-y-1">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-[#E10600]">
+                          <AlertTriangle className="w-4 h-4" />
+                          <span>Risk Assessment</span>
+                        </div>
+                        <p className="text-xs text-white/80 leading-relaxed font-sans">{analysis.risk_assessment}</p>
+                      </div>
+
+                      <div className="bg-white/3 border border-white/6 rounded-2xl p-4 space-y-1">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-[#FFC400]">
+                          <Clock className="w-4 h-4" />
+                          <span>Recommended Operational Action</span>
+                        </div>
+                        <p className="text-xs text-white/80 leading-relaxed font-sans">{analysis.recommended_action}</p>
+                      </div>
+                    </div>
+
+                    {analysis.similar_reports && analysis.similar_reports.length > 0 && (
+                      <div className="border-t border-white/8 pt-4 space-y-2">
+                        <p className="text-[11px] font-mono uppercase text-white/40">Similar Reports in Vicinity ({analysis.similar_reports_count})</p>
+                        <div className="space-y-1.5">
+                          {analysis.similar_reports.map((s) => (
+                            <div key={s.id} className="text-xs text-white/60 bg-white/4 border border-white/6 rounded-xl p-2.5 flex items-center justify-between">
+                              <span>{s.complaint_number || s.id} — {s.title}</span>
+                              <span className="font-mono text-[10px] text-[#FFC400]">{s.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : analysisError ? (
+                  <div className="py-12 text-center space-y-3">
+                    <AlertTriangle className="w-8 h-8 text-[#FFC400] mx-auto" />
+                    <p className="text-sm font-bold text-white font-display">AI Diagnostic Unavailable</p>
+                    <p className="text-xs text-white/50 max-w-sm mx-auto font-mono">{analysisError}</p>
+                    {selectedId && (
+                      <motion.button
+                        {...buttonGestures}
+                        onClick={() => void openAIDiagnostic(selectedId)}
+                        className="btn-primary py-2 px-3.5 text-xs font-bold inline-flex items-center gap-1.5 font-mono"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Retry AI Inspection
+                      </motion.button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-12 text-center text-white/40 text-sm font-mono">
+                    Failed to load diagnostic telemetry.
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-white/8 bg-[#151515] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(null)}
+                  className="btn-secondary text-xs py-2 px-4 font-mono"
+                >
+                  Close
+                </button>
+                {selectedId && (
+                  <Link
+                    to={`/admin/complaints/${selectedId}`}
+                    className="btn-primary text-xs py-2 px-4 glow-red-sm font-mono flex items-center gap-1"
+                  >
+                    Open Full Detail Record <ArrowUpRight className="w-3.5 h-3.5" />
+                  </Link>
+                )}
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </AnimatePresence>
+    </PageTransition>
   );
 }
