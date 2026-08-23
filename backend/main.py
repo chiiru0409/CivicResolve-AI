@@ -98,11 +98,13 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(RuntimeError)
-async def runtime_error_handler(request, exc: RuntimeError):
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     msg = str(exc)
-    logger.error("API RuntimeError on %s %s: %s", request.method, request.url.path, msg)
-    if "DATABASE_URL" in msg or "PostgreSQL" in msg or "database" in msg.lower():
+    logger.error("Unhandled API Exception on %s %s: %s", request.method, request.url.path, msg)
+    if "DATABASE_URL" in msg or "PostgreSQL" in msg or "database" in msg.lower() or "psycopg2" in msg.lower() or "connection" in msg.lower():
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={
