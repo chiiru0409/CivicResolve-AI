@@ -83,7 +83,7 @@ export default function AdminLayout() {
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto bg-[#090909]">
+          <main className="flex-1 overflow-y-auto bg-[#090909]" data-lenis-prevent="true">
             <ErrorBoundary fallbackTitle="Admin Section Error" fallbackMessage="An unexpected error occurred loading this administrative module.">
               <Routes>
                 <Route index                  element={<AdminOverviewPage />} />

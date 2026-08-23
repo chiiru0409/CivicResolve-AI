@@ -86,7 +86,7 @@ const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onClose }) => {
           <p className="text-[11px] text-white/40 mt-1 font-mono">Authority Telemetry</p>
         </div>
 
-        <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto" data-lenis-prevent="true">
           {navItems.map((item) => {
             const active = isActive(item.path, item.exact);
             const Icon = item.icon;

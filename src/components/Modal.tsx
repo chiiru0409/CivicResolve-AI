@@ -62,6 +62,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
             animate="animate"
             exit="exit"
             className={`relative bg-[#0E0E0E] border border-white/10 rounded-3xl shadow-2xl w-full ${sizeClasses[size]} max-h-[90vh] overflow-y-auto z-10`}
+            data-lenis-prevent="true"
           >
             {/* Top accent line */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#E10600] to-transparent rounded-t-3xl" />

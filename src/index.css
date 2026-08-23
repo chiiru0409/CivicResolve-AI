@@ -33,6 +33,7 @@
   *, *::before, *::after { box-sizing: border-box; }
 
   html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  html.lenis, html.lenis-smooth { scroll-behavior: auto !important; }
 
   body {
     background-color: var(--civic-black);

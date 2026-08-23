@@ -99,11 +99,11 @@ function AppShell() {
 function App() {
   return (
     <AuthProvider>
-      <SmoothScroll>
-        <Router>
+      <Router>
+        <SmoothScroll>
           <AppShell />
-        </Router>
-      </SmoothScroll>
+        </SmoothScroll>
+      </Router>
     </AuthProvider>
   );
 }
