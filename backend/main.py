@@ -1736,13 +1736,7 @@ def handle_voice_turn(
     return VoiceTurnResponse(**result)
 
 
-# ── Mount all routes at BOTH root AND /api ─────────────────────────────────────
-app.include_router(router)
-app.include_router(router, prefix="/api")
-
-
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse
 
 @app.get("/docs", include_in_schema=False)
 @app.get("/api/docs", include_in_schema=False)
@@ -1767,6 +1761,10 @@ def root_health():
     diag = get_database_diagnostics()
     log_db_operation("health_check", diag.get("complaints_count"))
     return diag
+
+# ── Mount all routes at BOTH root AND /api ─────────────────────────────────────
+app.include_router(router)
+app.include_router(router, prefix="/api")
 
 
 if __name__ == "__main__":
