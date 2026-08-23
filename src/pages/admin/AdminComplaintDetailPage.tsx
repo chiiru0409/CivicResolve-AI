@@ -32,12 +32,14 @@ export default function AdminComplaintDetailPage() {
   const [team, setTeam]           = useState('');
   const [viewMode, setViewMode]   = useState<'original' | 'ai_overlay'>('ai_overlay');
 
-  const loadComplaint = useCallback(async (cid: string) => {
+  const loadComplaint = useCallback(async (cid: string, isCurrent?: () => boolean) => {
     const cleanId = (cid || '').trim();
     if (!cleanId) {
-      setError('Invalid incident ID provided.');
-      setNotFound(true);
-      setLoading(false);
+      if (!isCurrent || isCurrent()) {
+        setError('Invalid incident ID provided.');
+        setNotFound(true);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
@@ -46,6 +48,7 @@ export default function AdminComplaintDetailPage() {
 
     try {
       const c = await adminGetComplaint(cleanId);
+      if (isCurrent && !isCurrent()) return;
       if (!c) {
         setNotFound(true);
         setComplaint(null);
@@ -58,6 +61,7 @@ export default function AdminComplaintDetailPage() {
         setNotFound(false);
       }
     } catch (e: any) {
+      if (isCurrent && !isCurrent()) return;
       const status = e?.status;
       const msg = e instanceof Error ? e.message : 'Failed to load complaint from municipal database.';
       if (status === 404 || msg.toLowerCase().includes('not found')) {
@@ -69,17 +73,24 @@ export default function AdminComplaintDetailPage() {
         addToast(msg, 'error');
       }
     } finally {
-      setLoading(false);
+      if (!isCurrent || isCurrent()) {
+        setLoading(false);
+      }
     }
   }, [addToast]);
 
   useEffect(() => {
+    let mounted = true;
+    const isCurrent = () => mounted;
     if (!id) {
       setLoading(false);
       setNotFound(true);
       return;
     }
-    void loadComplaint(id);
+    void loadComplaint(id, isCurrent);
+    return () => {
+      mounted = false;
+    };
   }, [id, loadComplaint]);
 
   const handleStatusUpdate = async (newStatus: ComplaintStatus) => {
@@ -92,6 +103,11 @@ export default function AdminComplaintDetailPage() {
         updated_by: 'admin',
       });
       addToast(`Status updated to "${newStatus}"`, 'success');
+      try {
+        window.dispatchEvent(new CustomEvent('complaints:updated'));
+      } catch {
+        // ignore
+      }
       await loadComplaint(id);
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Update failed.', 'error');
@@ -111,6 +127,11 @@ export default function AdminComplaintDetailPage() {
         assigned_by: 'admin',
       });
       addToast('Department assignment saved.', 'success');
+      try {
+        window.dispatchEvent(new CustomEvent('complaints:updated'));
+      } catch {
+        // ignore
+      }
       await loadComplaint(id);
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Assignment failed.', 'error');

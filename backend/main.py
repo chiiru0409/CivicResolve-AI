@@ -429,15 +429,25 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
 
     conn = get_connection()
     try:
-        # Check for rapid double-submission (same citizen and description within 6 seconds)
-        recent = conn.execute(
-            """
-            SELECT * FROM complaints 
-            WHERE citizen_id = ? AND description = ?
-            ORDER BY created_at DESC LIMIT 1;
-            """,
-            (citizen_id, body.description.strip()),
-        ).fetchone()
+        # Server-side 60-second duplicate protection
+        if citizen_id is not None:
+            recent = conn.execute(
+                """
+                SELECT * FROM complaints 
+                WHERE citizen_id = ? AND description = ?
+                ORDER BY created_at DESC LIMIT 1;
+                """,
+                (citizen_id, body.description.strip()),
+            ).fetchone()
+        else:
+            recent = conn.execute(
+                """
+                SELECT * FROM complaints 
+                WHERE is_anonymous = 1 AND description = ? AND location = ?
+                ORDER BY created_at DESC LIMIT 1;
+                """,
+                (body.description.strip(), (body.location or '').strip()),
+            ).fetchone()
 
         if recent:
             recent_dict = dict(recent)
@@ -452,7 +462,7 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
                     if c_time.tzinfo is None:
                         c_time = c_time.replace(tzinfo=timezone.utc)
                     diff = (datetime.now(timezone.utc) - c_time).total_seconds()
-                    if 0 <= diff < 10:
+                    if 0 <= diff < 60:
                         is_recent_duplicate = True
             except Exception as ex:
                 logger.warning("Timestamp parsing fallback in deduplication: %s", ex)
