@@ -6,6 +6,8 @@ import Navbar from './components/Navbar';
 import AIChat from './components/AIChat';
 import EagleEyeLogo from './components/EagleEyeLogo';
 
+import ErrorBoundary from './components/ErrorBoundary';
+
 // ── Citizen pages ───────────────────────────────────────────
 const LandingPage        = lazy(() => import('./pages/LandingPage'));
 const RegisterPage       = lazy(() => import('./pages/RegisterPage'));
@@ -59,31 +61,33 @@ function AppShell() {
       {!isAdmin && <Navbar />}
 
       <main id="main-content">
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* Public */}
-            <Route path="/"             element={<LandingPage />} />
-            <Route path="/register"     element={<RegisterPage />} />
-            <Route path="/login"        element={<LoginPage />} />
-            <Route path="/track"        element={<TrackComplaintPage />} />
-            <Route path="/how-it-works" element={<HowItWorksPage />} />
-            <Route path="/call"         element={<VoiceCallPage />} />
+        <ErrorBoundary fallbackTitle="Application View Error" fallbackMessage="An error occurred while loading this page. Please retry.">
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              {/* Public */}
+              <Route path="/"             element={<LandingPage />} />
+              <Route path="/register"     element={<RegisterPage />} />
+              <Route path="/login"        element={<LoginPage />} />
+              <Route path="/track"        element={<TrackComplaintPage />} />
+              <Route path="/how-it-works" element={<HowItWorksPage />} />
+              <Route path="/call"         element={<VoiceCallPage />} />
 
-            {/* Citizen protected */}
-            <Route path="/dashboard"      element={<CitizenRoute><CitizenDashboard /></CitizenRoute>} />
-            <Route path="/report"         element={<CitizenRoute><ReportIssuePage /></CitizenRoute>} />
-            <Route path="/analyze"        element={<CitizenRoute><AIAnalysisPage /></CitizenRoute>} />
-            <Route path="/success/:id"    element={<CitizenRoute><SuccessPage /></CitizenRoute>} />
-            <Route path="/my-complaints"  element={<CitizenRoute><MyComplaintsPage /></CitizenRoute>} />
-            <Route path="/profile"        element={<CitizenRoute><ProfilePage /></CitizenRoute>} />
+              {/* Citizen protected */}
+              <Route path="/dashboard"      element={<CitizenRoute><CitizenDashboard /></CitizenRoute>} />
+              <Route path="/report"         element={<CitizenRoute><ReportIssuePage /></CitizenRoute>} />
+              <Route path="/analyze"        element={<CitizenRoute><AIAnalysisPage /></CitizenRoute>} />
+              <Route path="/success/:id"    element={<CitizenRoute><SuccessPage /></CitizenRoute>} />
+              <Route path="/my-complaints"  element={<CitizenRoute><MyComplaintsPage /></CitizenRoute>} />
+              <Route path="/profile"        element={<CitizenRoute><ProfilePage /></CitizenRoute>} />
 
-            {/* Admin — AdminLayout handles its own AdminRoute guard */}
-            <Route path="/admin/login"  element={<AdminLoginPage />} />
-            <Route path="/admin/*"      element={<AdminLayout />} />
+              {/* Admin — AdminLayout handles its own AdminRoute guard */}
+              <Route path="/admin/login"  element={<AdminLoginPage />} />
+              <Route path="/admin/*"      element={<AdminLayout />} />
 
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </Suspense>
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {!isAdmin && <AIChat />}

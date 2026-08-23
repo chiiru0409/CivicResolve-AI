@@ -6,6 +6,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { AdminRoute } from '../../components/ProtectedRoute';
 import NotificationPanel from '../../components/NotificationPanel';
 import EagleEyeLogo from '../../components/EagleEyeLogo';
+import ErrorBoundary from '../../components/ErrorBoundary';
 
 // Admin pages (lazy load inline)
 import AdminOverviewPage     from './AdminOverviewPage';
@@ -71,17 +72,20 @@ export default function AdminLayout() {
           </header>
 
           <main className="flex-1 overflow-y-auto bg-[#090909]">
-            <Routes>
-              <Route index                  element={<AdminOverviewPage />} />
-              <Route path="complaints"      element={<AdminComplaintsPage />} />
-              <Route path="complaints/:id"  element={<AdminComplaintDetailPage />} />
-              <Route path="map"             element={<AdminMapPage />} />
-              <Route path="analytics"       element={<AdminAnalyticsPage />} />
-              <Route path="departments"     element={<AdminDepartmentsPage />} />
-              <Route path="escalations"     element={<AdminEscalationsPage />} />
-              <Route path="settings"        element={<AdminSettingsPage />} />
-              <Route path="*"               element={<Navigate to="/admin" replace />} />
-            </Routes>
+            <ErrorBoundary fallbackTitle="Admin Section Error" fallbackMessage="An unexpected error occurred loading this administrative module.">
+              <Routes>
+                <Route index                  element={<AdminOverviewPage />} />
+                <Route path="overview"        element={<AdminOverviewPage />} />
+                <Route path="complaints"      element={<AdminComplaintsPage />} />
+                <Route path="complaints/:id"  element={<AdminComplaintDetailPage />} />
+                <Route path="map"             element={<AdminMapPage />} />
+                <Route path="analytics"       element={<AdminAnalyticsPage />} />
+                <Route path="departments"     element={<AdminDepartmentsPage />} />
+                <Route path="escalations"     element={<AdminEscalationsPage />} />
+                <Route path="settings"        element={<AdminSettingsPage />} />
+                <Route path="*"               element={<Navigate to="/admin" replace />} />
+              </Routes>
+            </ErrorBoundary>
           </main>
         </div>
       </div>

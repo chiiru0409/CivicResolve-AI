@@ -78,7 +78,7 @@ const AIAnalysisPage: React.FC = () => {
   };
 
   const handleConfirm = async () => {
-    if (!analysis || !pendingData) return;
+    if (!analysis || !pendingData || submitting) return;
     setSubmitting(true);
     try {
       const complaint = await submitComplaint({

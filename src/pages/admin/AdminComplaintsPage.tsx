@@ -54,6 +54,7 @@ export default function AdminComplaintsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -72,13 +73,24 @@ export default function AdminComplaintsPage() {
   const openAIDiagnostic = async (id: string) => {
     setSelectedId(id);
     setAnalysis(null);
+    setAnalysisError(null);
     setAnalysisLoading(true);
+
+    const timer = setTimeout(() => {
+      setAnalysisError('AI diagnostic query timed out. Please retry.');
+      setAnalysisLoading(false);
+    }, 10000);
+
     try {
       const data = await api.get<AIAnalysis>(`/admin/ai/analysis/${encodeURIComponent(id)}`);
+      clearTimeout(timer);
       setAnalysis(data);
+      setAnalysisError(null);
     } catch (err) {
-      console.warn('AI analysis load failed:', err);
+      clearTimeout(timer);
+      setAnalysisError(err instanceof Error ? err.message : 'Unable to synthesize AI diagnostic telemetry.');
     } finally {
+      clearTimeout(timer);
       setAnalysisLoading(false);
     }
   };
@@ -324,6 +336,20 @@ export default function AdminComplaintsPage() {
                     </div>
                   )}
                 </>
+              ) : analysisError ? (
+                <div className="py-12 text-center space-y-3">
+                  <AlertTriangle className="w-8 h-8 text-[#FFC400] mx-auto" />
+                  <p className="text-sm font-bold text-white">AI Diagnostic Unavailable</p>
+                  <p className="text-xs text-white/50 max-w-sm mx-auto">{analysisError}</p>
+                  {selectedId && (
+                    <button
+                      onClick={() => void openAIDiagnostic(selectedId)}
+                      className="btn-primary py-2 px-3.5 text-xs font-bold inline-flex items-center gap-1.5"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Retry AI Inspection
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="py-12 text-center text-white/40 text-sm">
                   Failed to load diagnostic telemetry.

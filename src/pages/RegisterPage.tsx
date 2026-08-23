@@ -34,12 +34,20 @@ export default function RegisterPage() {
     if (!validate()) return;
     setLoading(true);
     try {
-      const res = await register({ full_name: form.full_name, email: form.email, phone: form.phone, password: form.password });
+      const res = await register({
+        full_name: form.full_name.trim(),
+        email: form.email.trim().toLowerCase(),
+        phone: form.phone.trim(),
+        password: form.password,
+      });
       onLoginSuccess(res);
       addToast('Account created! Welcome to CivicResolve.', 'success');
       setTimeout(() => navigate('/dashboard'), 800);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Registration failed.';
+      let msg = err instanceof Error ? err.message : 'Registration failed.';
+      if (msg.includes('EMAIL_ALREADY_REGISTERED') || msg.toLowerCase().includes('already exists') || msg.toLowerCase().includes('already registered')) {
+        msg = 'Account already exists. This email is already registered. Please sign in.';
+      }
       setServerError(msg);
       addToast(msg, 'error');
     } finally {
@@ -70,11 +78,14 @@ export default function RegisterPage() {
 
           <form onSubmit={handleSubmit} className="card space-y-4" noValidate>
             {serverError && (
-              <div className="p-3.5 bg-[#E10600]/10 border border-[#E10600]/30 rounded-xl text-sm text-[#E10600] flex flex-col gap-1.5">
-                <span>{serverError}</span>
-                {serverError.toLowerCase().includes('already exists') && (
-                  <Link to="/login" className="text-white font-bold underline hover:text-white/80 transition-colors">
-                    Account already exists? Click here to Sign In →
+              <div className="p-4 bg-[#E10600]/10 border border-[#E10600]/30 rounded-2xl text-sm text-[#E10600] flex flex-col gap-2">
+                <p className="font-semibold text-white/90">{serverError}</p>
+                {(serverError.toLowerCase().includes('already') || serverError.toLowerCase().includes('sign in')) && (
+                  <Link
+                    to="/login"
+                    className="btn-primary py-2 px-3 text-xs font-bold justify-center text-center mt-1"
+                  >
+                    Go to Sign In →
                   </Link>
                 )}
               </div>

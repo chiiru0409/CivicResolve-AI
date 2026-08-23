@@ -23,78 +23,6 @@
       "destination": "/api"
     },
     {
-      "source": "/health",
-      "destination": "/api"
-    },
-    {
-      "source": "/auth/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/complaints/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/complaints",
-      "destination": "/api"
-    },
-    {
-      "source": "/voice/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/track/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/chat",
-      "destination": "/api"
-    },
-    {
-      "source": "/departments/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/departments",
-      "destination": "/api"
-    },
-    {
-      "source": "/public/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/overview",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/complaints",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/login",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/departments",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/ai/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/complaints/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/analytics",
-      "destination": "/api"
-    },
-    {
-      "source": "/admin/map/(.*)",
-      "destination": "/api"
-    },
-    {
       "source": "/uploads/(.*)",
       "destination": "/api"
     },
@@ -104,3 +32,4 @@
     }
   ]
 }
+

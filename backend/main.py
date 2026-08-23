@@ -428,6 +428,29 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
 
     conn = get_connection()
     try:
+        # Check for rapid double-submission (same citizen and description within 6 seconds)
+        recent = conn.execute(
+            """
+            SELECT * FROM complaints 
+            WHERE citizen_id = ? AND description = ?
+            ORDER BY created_at DESC LIMIT 1;
+            """,
+            (citizen_id, body.description.strip()),
+        ).fetchone()
+
+        if recent:
+            recent_dict = dict(recent)
+            created_val = str(recent_dict.get("created_at") or "")
+            try:
+                if created_val:
+                    c_time = datetime.fromisoformat(created_val.replace("Z", "+00:00"))
+                    if (datetime.now(timezone.utc) - c_time).total_seconds() < 6:
+                        updates = _fetch_updates(conn, recent_dict["id"])
+                        assignments = _fetch_assignments(conn, recent_dict["id"])
+                        return _row_to_complaint_out(recent_dict, updates, assignments)
+            except Exception:
+                pass
+
         with conn:
             conn.execute(
                 """

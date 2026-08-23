@@ -32,25 +32,44 @@ export default function AdminComplaintDetailPage() {
   const [viewMode, setViewMode]   = useState<'original' | 'ai_overlay'>('ai_overlay');
 
   const loadComplaint = useCallback(async (cid: string) => {
+    if (!cid) {
+      setError('Invalid incident ID provided.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
+
+    const timer = setTimeout(() => {
+      setError('Database request timed out while retrieving incident record. Please retry.');
+      setLoading(false);
+    }, 10000);
+
     try {
       const c = await adminGetComplaint(cid);
+      clearTimeout(timer);
       setComplaint(c);
       setDepartment(c.department ?? '');
       setOfficer(c.assignedOfficer ?? c.assignedTo ?? '');
       setTeam(c.assignedTeam ?? '');
+      setError(null);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to load complaint from server.';
+      clearTimeout(timer);
+      const msg = e instanceof Error ? e.message : 'Failed to load complaint from municipal database.';
       setError(msg);
       addToast(msg, 'error');
     } finally {
+      clearTimeout(timer);
       setLoading(false);
     }
   }, [addToast]);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      setLoading(false);
+      setError('No incident identifier specified.');
+      return;
+    }
     void loadComplaint(id);
   }, [id, loadComplaint]);
 
