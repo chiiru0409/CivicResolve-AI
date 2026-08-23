@@ -5,6 +5,7 @@ import { CitizenRoute } from './components/ProtectedRoute';
 import Navbar from './components/Navbar';
 import AIChat from './components/AIChat';
 import EagleEyeLogo from './components/EagleEyeLogo';
+import SmoothScroll from './components/SmoothScroll';
 
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -98,9 +99,11 @@ function AppShell() {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <AppShell />
-      </Router>
+      <SmoothScroll>
+        <Router>
+          <AppShell />
+        </Router>
+      </SmoothScroll>
     </AuthProvider>
   );
 }

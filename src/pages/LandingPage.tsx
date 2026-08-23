@@ -10,6 +10,8 @@ import HeroMap from '../components/HeroMap';
 import { useAuth } from '../hooks/useAuth';
 import { useScrollReveal, useCounter } from '../hooks/useScrollReveal';
 import EagleEyeLogo from '../components/EagleEyeLogo';
+import Civic3DHero from '../components/Civic3DHero';
+import CivicTelemetryGrid from '../components/CivicTelemetryGrid';
 
 /* ── Counter Stat Component ─────────────────────────────────── */
 const CounterStat: React.FC<{ value: number; suffix?: string; label: string; color: string; delay: number }> = ({
@@ -330,6 +332,12 @@ export default function LandingPage() {
           ))}
         </div>
       </div>
+
+      {/* ── 3D Interactive Sticky-Canvas HUD Hero (Scroll Scrubber) ── */}
+      <Civic3DHero />
+
+      {/* ── Technical Diagnostics Matrix (Systems Nominal) ── */}
+      <CivicTelemetryGrid />
 
       {/* ══════════════════════════════════════════════════
           SECTION 01: THE CIVIC INTELLIGENCE ENGINE (HERO)
