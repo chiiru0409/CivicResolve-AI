@@ -98,6 +98,25 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RuntimeError)
+async def runtime_error_handler(request, exc: RuntimeError):
+    msg = str(exc)
+    logger.error("API RuntimeError on %s %s: %s", request.method, request.url.path, msg)
+    if "DATABASE_URL" in msg or "PostgreSQL" in msg or "database" in msg.lower():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": "database_unavailable",
+                "detail": msg,
+                "message": "Authoritative PostgreSQL database is not connected. Please verify DATABASE_URL in Vercel environment variables.",
+            },
+        )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": msg},
+    )
+
+
 # ── Immediate DB Initialization (essential for Vercel Serverless cold starts) ──
 def _ensure_initialized():
     try:

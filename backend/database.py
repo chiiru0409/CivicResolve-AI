@@ -56,6 +56,7 @@ def _resolve_db_url() -> Optional[str]:
     """
     Resolve and clean the PostgreSQL database connection string from environment variables.
     Canonical variable: DATABASE_URL.
+    Supports full URLs (DATABASE_URL, POSTGRES_URL, NEON_DATABASE_URL, etc.) or individual PG* variables.
     """
     raw_url = (
         os.getenv("DATABASE_URL")
@@ -65,9 +66,23 @@ def _resolve_db_url() -> Optional[str]:
         or os.getenv("POSTGRES_URL_NON_POOLING")
         or os.getenv("NEON_DATABASE_URL")
         or os.getenv("SUPABASE_DATABASE_URL")
+        or os.getenv("DATABASE_PRIVATE_URL")
+        or os.getenv("DATABASE_URL_UNPOOLED")
+        or os.getenv("POSTGRES_DIRECT_URL")
+        or os.getenv("NEON_URL")
         or os.getenv("database_url")
         or os.getenv("postgres_url")
     )
+
+    if not raw_url:
+        host = os.getenv("PGHOST") or os.getenv("POSTGRES_HOST")
+        user = os.getenv("PGUSER") or os.getenv("POSTGRES_USER")
+        password = os.getenv("PGPASSWORD") or os.getenv("POSTGRES_PASSWORD")
+        database = os.getenv("PGDATABASE") or os.getenv("POSTGRES_DATABASE") or "Admin"
+        port = os.getenv("PGPORT") or os.getenv("POSTGRES_PORT") or "5432"
+        if host and user and password:
+            raw_url = f"postgresql://{user}:{password}@{host}:{port}/{database}?sslmode=require"
+
     if not raw_url:
         return None
 
@@ -76,7 +91,7 @@ def _resolve_db_url() -> Optional[str]:
         cleaned = "postgresql://" + cleaned[len("postgres://"):]
 
     # Ensure sslmode=require for remote / Neon databases if not explicitly specified
-    if "sslmode=" not in cleaned and ("neon.tech" in cleaned or "amazonaws.com" in cleaned or "supabase" in cleaned):
+    if "sslmode=" not in cleaned and ("neon.tech" in cleaned or "amazonaws.com" in cleaned or "supabase" in cleaned or "vercel" in cleaned):
         separator = "&" if "?" in cleaned else "?"
         cleaned = f"{cleaned}{separator}sslmode=require"
 
@@ -286,11 +301,12 @@ class RowWrapper(dict):
 
 def _convert_sql_to_postgres(sql: str) -> str:
     pg_sql = sql.replace("?", "%s")
+    pg_sql = re.sub(r"DEFAULT\s*\(\s*datetime\('now'\)\s*\)", "DEFAULT (CURRENT_TIMESTAMP::text)", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE::text", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE::text", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')::text", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')::text", pg_sql, flags=re.IGNORECASE)
-    pg_sql = re.sub(r"datetime\('now'\)", "TO_CHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now'\)", "(CURRENT_TIMESTAMP::text)", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", pg_sql, flags=re.IGNORECASE)
