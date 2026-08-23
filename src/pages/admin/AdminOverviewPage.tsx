@@ -81,6 +81,13 @@ export default function AdminOverviewPage() {
   useEffect(() => {
     void fetchOverview();
     void fetchBrief();
+
+    const handleUpdate = () => {
+      void fetchOverview();
+      void fetchBrief();
+    };
+    window.addEventListener('complaints:updated', handleUpdate);
+    return () => window.removeEventListener('complaints:updated', handleUpdate);
   }, []);
 
   const handleRefreshAll = () => {
@@ -93,10 +100,10 @@ export default function AdminOverviewPage() {
   const pendingCases = complaints.filter((c) => !['Resolved', 'Closed', 'Archived'].includes(c.status));
   const resolvedCases = complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status));
 
-  const totalCount = overview ? overview.total_complaints : Math.max(total, complaints.length);
-  const highCount = overview ? overview.high_priority : highPriorityCases.length;
-  const pendingCount = overview ? overview.pending : pendingCases.length;
-  const resolvedCount = overview ? overview.resolved : resolvedCases.length;
+  const totalCount = overview?.total_complaints ?? (loading ? 0 : Math.max(total, complaints.length));
+  const highCount = overview?.high_priority ?? (loading ? 0 : highPriorityCases.length);
+  const pendingCount = overview?.pending ?? (loading ? 0 : pendingCases.length);
+  const resolvedCount = overview?.resolved ?? (loading ? 0 : resolvedCases.length);
 
   const hasFatalError = (error || overviewError) && !overview && complaints.length === 0;
 
@@ -296,8 +303,10 @@ export default function AdminOverviewPage() {
               </Link>
             ))}
             {highPriorityCases.length === 0 && !loading && (
-              <div className="p-8 text-center text-white/40 text-xs">
-                No high-priority cases pending in the queue.
+              <div className="p-10 text-center text-white/40 text-xs space-y-2">
+                <CheckCircle className="w-8 h-8 text-[#22C55E]/60 mx-auto" />
+                <p className="font-semibold text-white/80">All Priority Cases Dispatched</p>
+                <p className="text-white/40 text-[11px]">No unresolved high or critical priority incidents requiring immediate supervisor action.</p>
               </div>
             )}
           </div>

@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -440,16 +441,27 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
 
         if recent:
             recent_dict = dict(recent)
-            created_val = str(recent_dict.get("created_at") or "")
+            created_val = str(recent_dict.get("created_at") or "").strip()
+            is_recent_duplicate = False
             try:
                 if created_val:
-                    c_time = datetime.fromisoformat(created_val.replace("Z", "+00:00"))
-                    if (datetime.now(timezone.utc) - c_time).total_seconds() < 6:
-                        updates = _fetch_updates(conn, recent_dict["id"])
-                        assignments = _fetch_assignments(conn, recent_dict["id"])
-                        return _row_to_complaint_out(recent_dict, updates, assignments)
-            except Exception:
-                pass
+                    clean_ts = created_val.replace("Z", "+00:00")
+                    if " " in clean_ts and "T" not in clean_ts:
+                        clean_ts = clean_ts.replace(" ", "T")
+                    c_time = datetime.fromisoformat(clean_ts)
+                    if c_time.tzinfo is None:
+                        c_time = c_time.replace(tzinfo=timezone.utc)
+                    diff = (datetime.now(timezone.utc) - c_time).total_seconds()
+                    if 0 <= diff < 10:
+                        is_recent_duplicate = True
+            except Exception as ex:
+                logger.warning("Timestamp parsing fallback in deduplication: %s", ex)
+                is_recent_duplicate = True
+
+            if is_recent_duplicate:
+                updates = _fetch_updates(conn, recent_dict["id"])
+                assignments = _fetch_assignments(conn, recent_dict["id"])
+                return _row_to_complaint_out(recent_dict, updates, assignments)
 
         with conn:
             conn.execute(
@@ -796,6 +808,7 @@ def track_complaint(complaint_number: str):
 
         # Return ONLY safe fields — no PII, no coordinates, no internal data
         return {
+            "id":                d["id"],
             "complaint_number":  d["complaint_number"],
             "title":             d["title"],
             "category":          d["category"],
@@ -879,20 +892,26 @@ def admin_list_complaints(
 
 @router.get("/admin/complaints/{complaint_id}")
 def admin_get_complaint(complaint_id: str, current_user: dict = Depends(require_admin)):
+    clean_id = (complaint_id or "").strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="Invalid complaint identifier.")
     conn = get_connection()
     try:
-        row = conn.execute("SELECT * FROM complaints WHERE id = ? OR complaint_number = ?;", (complaint_id, complaint_id)).fetchone()
+        row = conn.execute("SELECT * FROM complaints WHERE id = ? OR complaint_number = ?;", (clean_id, clean_id)).fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Complaint not found.")
+            raise HTTPException(status_code=404, detail=f"Incident record '{clean_id}' not found in municipal database.")
         d = dict(row)
         real_id = d["id"]
         updates     = _fetch_updates(conn, real_id)
         assignments = _fetch_assignments(conn, real_id)
         citizen = None
         if d.get("citizen_id"):
-            u_row = conn.execute("SELECT id, full_name, email, phone FROM users WHERE id = ?;", (d["citizen_id"],)).fetchone()
-            if u_row:
-                citizen = dict(u_row)
+            try:
+                u_row = conn.execute("SELECT id, full_name, email, phone FROM users WHERE id = ?;", (d["citizen_id"],)).fetchone()
+                if u_row:
+                    citizen = dict(u_row)
+            except Exception as e:
+                logger.warning("Citizen lookup failed for complaint %s: %s", real_id, e)
         return _row_to_complaint_out(d, updates, assignments, citizen)
     finally:
         conn.close()
@@ -977,12 +996,12 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
     conn = get_connection()
     try:
         total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
-        high  = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority IN ('HIGH','CRITICAL');").fetchone()[0]
-        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved','Closed');").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE status IN ('Resolved','Closed');").fetchone()[0]
+        high  = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) IN ('HIGH','CRITICAL');").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved','closed','archived');").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved','closed');").fetchone()[0]
 
         by_cat = conn.execute(
-            "SELECT category, COUNT(*) as count FROM complaints GROUP BY category;"
+            "SELECT category, COUNT(*) as count FROM complaints GROUP BY category ORDER BY count DESC;"
         ).fetchall()
         by_pri = conn.execute(
             "SELECT priority, COUNT(*) as count FROM complaints GROUP BY priority;"
@@ -991,7 +1010,7 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
             "SELECT status, COUNT(*) as count FROM complaints GROUP BY status;"
         ).fetchall()
         by_dep = conn.execute(
-            "SELECT department, COUNT(*) as count FROM complaints WHERE department IS NOT NULL GROUP BY department;"
+            "SELECT department, COUNT(*) as count FROM complaints WHERE department IS NOT NULL GROUP BY department ORDER BY count DESC;"
         ).fetchall()
 
         return {
@@ -1074,9 +1093,9 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
     conn = get_connection()
     try:
         total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
-        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE priority IN ('HIGH', 'CRITICAL');").fetchone()[0]
-        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed');").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE status IN ('Resolved', 'Closed');").fetchone()[0]
+        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) IN ('HIGH', 'CRITICAL');").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived');").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved', 'closed');").fetchone()[0]
 
         now_dt = datetime.now(timezone.utc)
         today_iso = now_dt.strftime("%Y-%m-%d")
@@ -1102,7 +1121,7 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
         pri_counts = {r[0]: r[1] for r in by_pri_rows}
 
         by_dep_rows = conn.execute(
-            "SELECT department, COUNT(*) as cnt FROM complaints WHERE status NOT IN ('Resolved', 'Closed') AND department IS NOT NULL GROUP BY department ORDER BY cnt DESC;"
+            "SELECT department, COUNT(*) as cnt FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND department IS NOT NULL GROUP BY department ORDER BY cnt DESC;"
         ).fetchall()
         top_dept = by_dep_rows[0][0] if by_dep_rows else "Municipal Roads & Infrastructure Department"
         top_cat = by_cat_rows[0][0] if by_cat_rows else "Roads"

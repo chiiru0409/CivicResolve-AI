@@ -79,6 +79,7 @@ export function useCitizenComplaints() {
     void load(isFresh);
 
     const onUpdate = () => {
+      _citizenCache = null;
       if (mountedRef.current) void load(true);
     };
     window.addEventListener('complaints:updated', onUpdate);
@@ -91,7 +92,7 @@ export function useCitizenComplaints() {
     };
   }, [load]);
 
-  return { complaints, loading, error, refetch: () => load(false) };
+  return { complaints, loading, error, refetch: () => { _citizenCache = null; void load(false); } };
 }
 
 // ── Single complaint detail ───────────────────────────────────────────────────
@@ -247,6 +248,7 @@ export function useAdminComplaints(filters?: Record<string, string>) {
     void load(isFresh);
 
     const onUpdate = () => {
+      _adminCache.clear();
       if (mountedRef.current) {
         void load(true);
       }
@@ -261,5 +263,14 @@ export function useAdminComplaints(filters?: Record<string, string>) {
     };
   }, [filtersKey, load]);
 
-  return { complaints, total, loading, error, refetch: () => load(false) };
+  return {
+    complaints,
+    total,
+    loading,
+    error,
+    refetch: () => {
+      _adminCache.delete(filtersKey);
+      void load(false);
+    },
+  };
 }

@@ -93,7 +93,7 @@ export async function analyzeComplaint(
   location: string,
   _imageUrl?: string,
 ): Promise<AIAnalysis> {
-  await delay(3500);
+  await delay(600);
   const category   = detectCategory(description);
   const priority   = detectPriority(description);
   const department = getDepartmentByCategory(category);

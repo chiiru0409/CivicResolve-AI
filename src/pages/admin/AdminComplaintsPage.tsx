@@ -115,7 +115,11 @@ export default function AdminComplaintsPage() {
           <span>Incident Queue & Triage</span>
         </div>
         <h1 className="text-3xl font-black text-white tracking-tight">Complaint Management</h1>
-        <p className="text-white/40 text-sm mt-0.5">{Math.max(total, complaints.length)} complaints in system · {complaints.length} matched active filter</p>
+        <p className="text-white/40 text-sm mt-0.5">
+          {hasFilters
+            ? `${total} matching complaints found · Showing ${complaints.length} records`
+            : `${total} complaints registered in municipal database`}
+        </p>
       </div>
 
       <div className="speed-line" />

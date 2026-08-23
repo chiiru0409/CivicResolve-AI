@@ -24,6 +24,7 @@ export default function AdminComplaintDetailPage() {
   const { toasts, addToast, dismissToast } = useToast();
   const [complaint, setComplaint] = useState<Complaint | null>(null);
   const [loading, setLoading]     = useState(true);
+  const [notFound, setNotFound]   = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [updating, setUpdating]   = useState(false);
   const [department, setDepartment] = useState('');
@@ -32,34 +33,42 @@ export default function AdminComplaintDetailPage() {
   const [viewMode, setViewMode]   = useState<'original' | 'ai_overlay'>('ai_overlay');
 
   const loadComplaint = useCallback(async (cid: string) => {
-    if (!cid) {
+    const cleanId = (cid || '').trim();
+    if (!cleanId) {
       setError('Invalid incident ID provided.');
+      setNotFound(true);
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-
-    const timer = setTimeout(() => {
-      setError('Database request timed out while retrieving incident record. Please retry.');
-      setLoading(false);
-    }, 10000);
+    setNotFound(false);
 
     try {
-      const c = await adminGetComplaint(cid);
-      clearTimeout(timer);
-      setComplaint(c);
-      setDepartment(c.department ?? '');
-      setOfficer(c.assignedOfficer ?? c.assignedTo ?? '');
-      setTeam(c.assignedTeam ?? '');
-      setError(null);
-    } catch (e) {
-      clearTimeout(timer);
+      const c = await adminGetComplaint(cleanId);
+      if (!c) {
+        setNotFound(true);
+        setComplaint(null);
+      } else {
+        setComplaint(c);
+        setDepartment(c.department ?? '');
+        setOfficer(c.assignedOfficer ?? c.assignedTo ?? '');
+        setTeam(c.assignedTeam ?? '');
+        setError(null);
+        setNotFound(false);
+      }
+    } catch (e: any) {
+      const status = e?.status;
       const msg = e instanceof Error ? e.message : 'Failed to load complaint from municipal database.';
-      setError(msg);
-      addToast(msg, 'error');
+      if (status === 404 || msg.toLowerCase().includes('not found')) {
+        setNotFound(true);
+        setError(null);
+        setComplaint(null);
+      } else {
+        setError(msg);
+        addToast(msg, 'error');
+      }
     } finally {
-      clearTimeout(timer);
       setLoading(false);
     }
   }, [addToast]);
@@ -67,7 +76,7 @@ export default function AdminComplaintDetailPage() {
   useEffect(() => {
     if (!id) {
       setLoading(false);
-      setError('No incident identifier specified.');
+      setNotFound(true);
       return;
     }
     void loadComplaint(id);
@@ -122,33 +131,70 @@ export default function AdminComplaintDetailPage() {
     );
   }
 
+  if (notFound || (!loading && !complaint && !error)) {
+    return (
+      <div className="p-6 lg:p-8 space-y-6 max-w-2xl mx-auto text-center pt-12">
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <div className="bg-[#111] border border-white/8 rounded-3xl p-10 space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-[#E10600]/10 border border-[#E10600]/20 flex items-center justify-center mx-auto text-[#E10600]">
+            <AlertOctagon className="w-8 h-8" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-white font-display">Incident Record Not Found</h2>
+            <p className="text-sm text-white/50 max-w-md mx-auto mt-2">
+              Complaint record <span className="font-mono text-[#E10600] font-bold">"{id}"</span> does not exist in the municipal PostgreSQL database or may have been archived.
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-3 pt-4">
+            <button
+              onClick={() => navigate('/admin/complaints')}
+              className="btn-primary py-2.5 px-5 text-xs font-bold"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Incident Queue
+            </button>
+            <button
+              onClick={() => id && void loadComplaint(id)}
+              className="btn-secondary py-2.5 px-4 text-xs font-bold"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Check Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (error || !complaint) {
     return (
-      <div className="p-6 lg:p-8 space-y-6 max-w-3xl mx-auto text-center">
+      <div className="p-6 lg:p-8 space-y-6 max-w-2xl mx-auto text-center pt-12">
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-        <div className="bg-[#111] border border-white/8 rounded-3xl p-8 space-y-4">
-          <AlertTriangle className="w-12 h-12 text-[#FFC400] mx-auto" />
-          <h2 className="text-xl font-bold text-white">
-            {error ? 'Unable to Load Incident Record' : 'Incident Record Not Found'}
-          </h2>
-          <p className="text-sm text-white/50 max-w-md mx-auto">
-            {error || `Complaint "${id}" does not exist in the database or could not be retrieved.`}
-          </p>
-          <div className="flex items-center justify-center gap-3 pt-2">
+        <div className="bg-[#111] border border-[#E10600]/30 rounded-3xl p-10 space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-[#E10600]/10 border border-[#E10600]/20 flex items-center justify-center mx-auto text-[#E10600]">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-white font-display">Database Communication Error</h2>
+            <p className="text-sm text-white/50 max-w-md mx-auto mt-2">
+              {error || 'An unexpected error occurred while communicating with the database server.'}
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-3 pt-4">
             {id && (
               <button
                 onClick={() => void loadComplaint(id)}
-                className="btn-primary flex items-center gap-2 py-2.5 px-4 text-xs font-bold"
+                className="btn-primary flex items-center gap-2 py-2.5 px-5 text-xs font-bold glow-red-sm"
               >
                 <RefreshCw className="w-4 h-4" />
-                Retry
+                Retry Database Query
               </button>
             )}
             <button
               onClick={() => navigate('/admin/complaints')}
               className="btn-secondary py-2.5 px-4 text-xs font-bold"
             >
-              Back to Complaints List
+              Back to Incident Queue
             </button>
           </div>
         </div>

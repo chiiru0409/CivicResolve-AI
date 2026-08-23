@@ -45,11 +45,14 @@ export default function RegisterPage() {
       setTimeout(() => navigate('/dashboard'), 800);
     } catch (err) {
       let msg = err instanceof Error ? err.message : 'Registration failed.';
-      if (msg.includes('EMAIL_ALREADY_REGISTERED') || msg.toLowerCase().includes('already exists') || msg.toLowerCase().includes('already registered')) {
+      const isDuplicate = msg.includes('EMAIL_ALREADY_REGISTERED') || msg.toLowerCase().includes('already exists') || msg.toLowerCase().includes('already registered');
+      if (isDuplicate) {
         msg = 'Account already exists. This email is already registered. Please sign in.';
+        addToast(msg, 'warning');
+      } else {
+        addToast(msg, 'error');
       }
       setServerError(msg);
-      addToast(msg, 'error');
     } finally {
       setLoading(false);
     }

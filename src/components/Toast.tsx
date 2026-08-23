@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 
 interface ToastProps {
@@ -69,13 +69,15 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismis
 export function useToast() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const addToast = (message: string, type: ToastItem['type'] = 'info') => {
-    const id = Date.now().toString();
+  const addToast = useCallback((message: string, type: ToastItem['type'] = 'info') => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2, 6);
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
-  };
+  }, []);
 
-  const dismissToast = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id));
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   return { toasts, addToast, dismissToast };
 }

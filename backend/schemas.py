@@ -47,10 +47,20 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1)
 
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str) -> str:
+        return str(v).strip().lower()
+
 
 class AdminLogin(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str) -> str:
+        return str(v).strip().lower()
 
 
 class ProfileUpdate(BaseModel):

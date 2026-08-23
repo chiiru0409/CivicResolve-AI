@@ -80,7 +80,7 @@ export default function AdminDepartmentsPage() {
                 </div>
                 <div>
                   <h3 className="font-black text-white leading-tight">{d.name}</h3>
-                  <p className="text-xs text-white/40 mt-0.5">{d.shortName}</p>
+                  <p className="text-xs text-white/40 mt-0.5">{d.shortName || (d as any).short_name || d.name}</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-1.5 mb-4">
