@@ -28,7 +28,7 @@ export default function AdminMapPage() {
   const active   = complaints.filter((c) => !['Resolved','Closed'].includes(c.status)).length;
 
   // Only complaints with stored coordinates will appear on the map
-  const withCoords    = complaints.filter((c) => c.latitude != null && c.longitude != null);
+  const withCoords    = complaints.filter((c) => c.latitude != null && c.longitude != null && (c.latitude !== 0 || c.longitude !== 0));
   const missingCoords = complaints.length - withCoords.length;
 
   // Auto-compute centre from real complaint coordinates

@@ -15,28 +15,39 @@ interface AdminCacheEntry {
   timestamp: number;
 }
 
+const CACHE_TTL_MS = 5000;
 const _adminCache = new Map<string, AdminCacheEntry>();
 let _citizenCache: { complaints: Complaint[]; timestamp: number } | null = null;
 
 export function invalidateAdminComplaintsCache() {
   _adminCache.clear();
-  window.dispatchEvent(new CustomEvent('complaints:updated'));
+  try {
+    window.dispatchEvent(new CustomEvent('complaints:updated'));
+  } catch {
+    // ignore
+  }
 }
 
 export function invalidateCitizenComplaintsCache() {
   _citizenCache = null;
-  window.dispatchEvent(new CustomEvent('complaints:updated'));
+  try {
+    window.dispatchEvent(new CustomEvent('complaints:updated'));
+  } catch {
+    // ignore
+  }
 }
 
 // ── Citizen: own complaints list ──────────────────────────────────────────────
 export function useCitizenComplaints() {
-  const [complaints, setComplaints] = useState<Complaint[]>(() => _citizenCache?.complaints ?? []);
-  const [loading, setLoading]       = useState<boolean>(() => _citizenCache == null);
+  const isCacheFresh = _citizenCache != null && (Date.now() - _citizenCache.timestamp < CACHE_TTL_MS);
+  const [complaints, setComplaints] = useState<Complaint[]>(() => isCacheFresh ? _citizenCache!.complaints : []);
+  const [loading, setLoading]       = useState<boolean>(() => !isCacheFresh);
   const [error, setError]           = useState<string | null>(null);
   const mountedRef                  = useRef(true);
 
   const load = useCallback(async (isBackground = false) => {
-    if (!isBackground && !_citizenCache) {
+    const isFresh = _citizenCache != null && (Date.now() - _citizenCache.timestamp < CACHE_TTL_MS);
+    if (!isBackground && !isFresh) {
       setLoading(true);
     }
     setError(null);
@@ -60,62 +71,101 @@ export function useCitizenComplaints() {
 
   useEffect(() => {
     mountedRef.current = true;
-    const hasCache = _citizenCache != null;
-    void load(hasCache);
+    const isFresh = _citizenCache != null && (Date.now() - _citizenCache.timestamp < CACHE_TTL_MS);
+    if (isFresh && _citizenCache) {
+      setComplaints(_citizenCache.complaints);
+      setLoading(false);
+    }
+    void load(isFresh);
 
     const onUpdate = () => {
-      if (mountedRef.current) {
-        void load(true);
-      }
+      if (mountedRef.current) void load(true);
     };
     window.addEventListener('complaints:updated', onUpdate);
+    window.addEventListener('auth:logout', invalidateCitizenComplaintsCache);
 
     return () => {
       mountedRef.current = false;
       window.removeEventListener('complaints:updated', onUpdate);
+      window.removeEventListener('auth:logout', invalidateCitizenComplaintsCache);
     };
   }, [load]);
 
   return { complaints, loading, error, refetch: () => load(false) };
 }
 
-// ── Citizen: single complaint detail ─────────────────────────────────────────
-export function useComplaintById(id: string | undefined) {
+// ── Single complaint detail ───────────────────────────────────────────────────
+export function useComplaint(id?: string) {
   const [complaint, setComplaint] = useState<Complaint | null>(null);
-  const [loading, setLoading]     = useState(false);
+  const [loading, setLoading]     = useState<boolean>(true);
   const [error, setError]         = useState<string | null>(null);
+  const [notFound, setNotFound]   = useState<boolean>(false);
+  const mountedRef                = useRef(true);
 
-  useEffect(() => {
-    if (!id) return;
-    setLoading(true);
-    getComplaintById(id)
-      .then((c) => setComplaint(c ?? null))
-      .catch((e) => setError(e instanceof Error ? e.message : 'Error loading complaint detail'))
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  return { complaint, loading, error };
-}
-
-// ── Public: track by complaint number ────────────────────────────────────────
-export function useTrackComplaint(complaintNumber: string | undefined) {
-  const [complaint, setComplaint] = useState<Complaint | null>(null);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [notFound, setNotFound]   = useState(false);
-
-  const search = useCallback(async (id: string) => {
+  const load = useCallback(async (targetId: string) => {
     setLoading(true);
     setError(null);
     setNotFound(false);
     try {
-      const c = await trackComplaint(id);
-      if (c) setComplaint(c);
-      else setNotFound(true);
+      const data = await getComplaintById(targetId);
+      if (!mountedRef.current) return;
+      if (!data) {
+        setNotFound(true);
+      } else {
+        setComplaint(data);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error finding complaint.');
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load complaint details.');
+      }
     } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    if (id) {
+      void load(id);
+    } else {
       setLoading(false);
+    }
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [id, load]);
+
+  return { complaint, loading, error, notFound, refetch: () => id && load(id) };
+}
+
+// ── Public complaint tracker ──────────────────────────────────────────────────
+export function useTrackComplaint(complaintNumber?: string) {
+  const [complaint, setComplaint] = useState<Complaint | null>(null);
+  const [loading, setLoading]     = useState<boolean>(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [notFound, setNotFound]   = useState<boolean>(false);
+  const mountedRef                = useRef(true);
+
+  const search = useCallback(async (num: string) => {
+    if (!num.trim()) return;
+    setLoading(true);
+    setError(null);
+    setNotFound(false);
+    try {
+      const data = await trackComplaint(num.trim());
+      if (!mountedRef.current) return;
+      if (!data) {
+        setNotFound(true);
+        setComplaint(null);
+      } else {
+        setComplaint(data);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Tracking lookup failed.');
+      }
+    } finally {
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
@@ -140,20 +190,23 @@ export function useAdminComplaints(filters?: Record<string, string>) {
   const filtersKey = JSON.stringify(cleanFilters);
 
   const cached = _adminCache.get(filtersKey);
-  const [complaints, setComplaints] = useState<Complaint[]>(() => cached?.complaints ?? []);
-  const [total, setTotal]           = useState<number>(() => cached?.total ?? (cached?.complaints.length ?? 0));
-  const [loading, setLoading]       = useState<boolean>(() => cached == null);
+  const isCacheFresh = cached != null && (Date.now() - cached.timestamp < CACHE_TTL_MS);
+  const [complaints, setComplaints] = useState<Complaint[]>(() => isCacheFresh ? cached.complaints : []);
+  const [total, setTotal]           = useState<number>(() => isCacheFresh ? cached.total : 0);
+  const [loading, setLoading]       = useState<boolean>(() => !isCacheFresh);
   const [error, setError]           = useState<string | null>(null);
   const mountedRef                  = useRef(true);
 
   const load = useCallback(async (isBackground = false) => {
     const currentCached = _adminCache.get(filtersKey);
-    if (!isBackground && !currentCached) {
+    const isFresh = currentCached != null && (Date.now() - currentCached.timestamp < CACHE_TTL_MS);
+    if (!isBackground && !isFresh) {
       setLoading(true);
     }
     setError(null);
     try {
-      const params = new URLSearchParams({ ...cleanFilters, _t: Date.now().toString() });
+      const parsedFilters: Record<string, string> = JSON.parse(filtersKey);
+      const params = new URLSearchParams({ ...parsedFilters, _t: Date.now().toString() });
       const data = await api.get<{ total: number; items: Record<string, unknown>[] }>(
         `/admin/complaints?${params.toString()}`,
       );
@@ -185,12 +238,13 @@ export function useAdminComplaints(filters?: Record<string, string>) {
   useEffect(() => {
     mountedRef.current = true;
     const currentCached = _adminCache.get(filtersKey);
-    if (currentCached) {
+    const isFresh = currentCached != null && (Date.now() - currentCached.timestamp < CACHE_TTL_MS);
+    if (isFresh && currentCached) {
       setComplaints(currentCached.complaints);
       setTotal(currentCached.total);
       setLoading(false);
     }
-    void load(currentCached != null);
+    void load(isFresh);
 
     const onUpdate = () => {
       if (mountedRef.current) {
@@ -198,10 +252,12 @@ export function useAdminComplaints(filters?: Record<string, string>) {
       }
     };
     window.addEventListener('complaints:updated', onUpdate);
+    window.addEventListener('auth:logout', invalidateAdminComplaintsCache);
 
     return () => {
       mountedRef.current = false;
       window.removeEventListener('complaints:updated', onUpdate);
+      window.removeEventListener('auth:logout', invalidateAdminComplaintsCache);
     };
   }, [filtersKey, load]);
 

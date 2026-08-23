@@ -26,6 +26,8 @@ interface AdminBrief {
   urgency_level: string;
   ai_summary: string;
   key_bullet_points: string[];
+  category_counts?: Record<string, number>;
+  priority_counts?: Record<string, number>;
 }
 
 interface AdminOverviewData {
@@ -45,15 +47,22 @@ interface AdminOverviewData {
 export default function AdminOverviewPage() {
   const { complaints, total, loading, error, refetch } = useAdminComplaints();
   const [overview, setOverview] = useState<AdminOverviewData | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [brief, setBrief] = useState<AdminBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
 
   const fetchOverview = async () => {
+    setOverviewLoading(true);
+    setOverviewError(null);
     try {
       const data = await api.get<AdminOverviewData>('/admin/overview');
       setOverview(data);
     } catch (err) {
       console.warn('Could not load authoritative overview counts:', err);
+      setOverviewError(err instanceof Error ? err.message : 'Database overview connection error');
+    } finally {
+      setOverviewLoading(false);
     }
   };
 
@@ -81,7 +90,15 @@ export default function AdminOverviewPage() {
   };
 
   const highPriorityCases = complaints.filter((c) => ['HIGH', 'CRITICAL'].includes(c.priority));
-  const pendingCases = complaints.filter((c) => !['Resolved', 'Closed'].includes(c.status));
+  const pendingCases = complaints.filter((c) => !['Resolved', 'Closed', 'Archived'].includes(c.status));
+  const resolvedCases = complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status));
+
+  const totalCount = overview ? overview.total_complaints : Math.max(total, complaints.length);
+  const highCount = overview ? overview.high_priority : highPriorityCases.length;
+  const pendingCount = overview ? overview.pending : pendingCases.length;
+  const resolvedCount = overview ? overview.resolved : resolvedCases.length;
+
+  const hasFatalError = (error || overviewError) && !overview && complaints.length === 0;
 
   return (
     <div className="p-6 lg:p-8 space-y-8 max-w-7xl mx-auto">
@@ -98,58 +115,75 @@ export default function AdminOverviewPage() {
         </div>
         <button
           onClick={handleRefreshAll}
-          disabled={loading || briefLoading}
+          disabled={loading || briefLoading || overviewLoading}
           className="flex items-center gap-2 text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 rounded-xl hover:border-white/20 transition-all disabled:opacity-50 self-start sm:self-center glow-red-sm"
         >
-          <RefreshCw className={`w-4 h-4 ${loading || briefLoading ? 'animate-spin text-[#E10600]' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${(loading || briefLoading || overviewLoading) ? 'animate-spin text-[#E10600]' : ''}`} />
           <span>Refresh Operations</span>
         </button>
       </div>
 
       {/* Error Alert Banner if Server Connection Failed */}
-      {error && (
-        <div className="card p-6 bg-[#181111] border-[#E10600]/30 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-          <div className="flex items-center gap-3 text-left">
-            <AlertTriangle className="w-6 h-6 text-[#E10600] flex-shrink-0" />
+      {(error || overviewError) && (
+        <div className="card p-4 bg-[#181111] border-[#E10600]/40 rounded-2xl flex items-center justify-between gap-4 shadow-xl">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-[#E10600] flex-shrink-0" />
             <div>
-              <p className="text-sm font-bold text-white">Database Sync Warning: Unable to load live complaints</p>
-              <p className="text-xs text-white/50 mt-0.5">{error}</p>
+              <p className="text-sm font-semibold text-white">Database Connection Alert</p>
+              <p className="text-xs text-white/60 mt-0.5">{error || overviewError}</p>
             </div>
           </div>
-          <button onClick={handleRefreshAll} className="btn-primary py-2 px-4 text-xs font-semibold flex-shrink-0">
+          <button
+            onClick={handleRefreshAll}
+            className="btn-primary py-1.5 px-4 text-xs font-semibold flex-shrink-0"
+          >
             Retry Connection
           </button>
         </div>
       )}
 
-      {/* ── AI Daily Civic Brief Banner ─────────────────────────────────── */}
-      <div className="card p-6 bg-[#0E0E0E] border-white/10 rounded-3xl relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#E10600] via-[#FFC400] to-[#22C55E]" />
-        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+      {/* ── AI Intelligence Brief Banner ─────────────────────────────────── */}
+      <div className="card p-6 bg-gradient-to-br from-[#120808] via-[#101010] to-[#0A0A0A] border-[#E10600]/30 rounded-2xl shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-[#E10600]/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+        
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 relative z-10">
           <div className="space-y-3 flex-1">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-[#FFC400]/10 border border-[#FFC400]/30 flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-[#FFC400]" />
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-[#E10600]/15 border border-[#E10600]/30 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-[#E10600]" />
               </div>
-              <h2 className="text-base font-black text-white tracking-wide">AI Daily Operations Brief</h2>
-              <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${
-                brief?.urgency_level === 'CRITICAL'
-                  ? 'text-[#E10600] bg-[#E10600]/15 border-[#E10600]/30 animate-pulse'
-                  : 'text-[#FFC400] bg-[#FFC400]/15 border-[#FFC400]/30'
-              }`}>
-                URGENCY: {brief?.urgency_level || 'NORMAL'}
-              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-black text-white">Daily AI Civic Intelligence Brief</h2>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                    brief?.urgency_level === 'CRITICAL' ? 'bg-[#E10600]/20 text-[#E10600] border border-[#E10600]/40 animate-pulse' :
+                    brief?.urgency_level === 'HIGH' ? 'bg-[#FFC400]/20 text-[#FFC400] border border-[#FFC400]/40' :
+                    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                  }`}>
+                    {brief?.urgency_level || 'ANALYZING'} PRIORITY
+                  </span>
+                </div>
+                <p className="text-xs text-white/40 font-mono mt-0.5">Authoritative synthesis grounded in live database telemetry</p>
+              </div>
             </div>
 
-            <p className="text-sm text-white/80 leading-relaxed max-w-4xl font-light">
-              {brief?.ai_summary || 'Analyzing current municipal complaint backlog, active field teams, and critical safety hazards...'}
-            </p>
+            {briefLoading ? (
+              <div className="space-y-2 pt-2">
+                <div className="h-4 bg-white/5 rounded animate-pulse w-full" />
+                <div className="h-4 bg-white/5 rounded animate-pulse w-4/5" />
+              </div>
+            ) : brief ? (
+              <p className="text-sm text-white/80 leading-relaxed font-sans">{brief.ai_summary}</p>
+            ) : (
+              <p className="text-sm text-white/50">Municipal operations operating within normal parameters.</p>
+            )}
 
-            {brief?.key_bullet_points && brief.key_bullet_points.length > 0 && (
+            {/* Bullet Highlights */}
+            {brief && brief.key_bullet_points && brief.key_bullet_points.length > 0 && (
               <div className="grid sm:grid-cols-2 gap-2 pt-2">
-                {brief.key_bullet_points.map((pt, i) => (
-                  <div key={i} className="flex items-start gap-2 text-xs text-white/60 bg-white/3 border border-white/6 rounded-xl p-2.5">
-                    <span className="text-[#FFC400] font-bold">⚡</span>
+                {brief.key_bullet_points.map((pt, idx) => (
+                  <div key={idx} className="flex items-start gap-2 text-xs text-white/70 bg-white/3 border border-white/6 rounded-lg p-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#E10600] mt-1.5 flex-shrink-0" />
                     <span>{pt}</span>
                   </div>
                 ))}
@@ -157,48 +191,66 @@ export default function AdminOverviewPage() {
             )}
           </div>
 
-          <div className="bg-[#141414] border border-white/8 rounded-2xl p-4 flex flex-col gap-2 min-w-[200px] flex-shrink-0">
-            <span className="text-[10px] font-mono text-white/40 uppercase">Top Workload Sector</span>
-            <span className="text-sm font-bold text-white truncate">{brief?.top_department || 'Municipal Engineering'}</span>
-            <div className="flex items-center justify-between text-xs text-white/50 pt-2 border-t border-white/6">
-              <span>Overdue (&gt;48h):</span>
-              <span className="font-mono text-[#E10600] font-bold">{brief?.overdue_count ?? 0} cases</span>
+          {/* Quick Metrics from Brief */}
+          {brief && (
+            <div className="flex sm:flex-col gap-3 flex-shrink-0 min-w-[200px]">
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
+                <p className="text-[10px] font-mono text-white/40 uppercase">Top Bottleneck Dept</p>
+                <p className="text-xs font-bold text-white mt-0.5 truncate">{brief.top_department}</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
+                <p className="text-[10px] font-mono text-white/40 uppercase">Lead Category</p>
+                <p className="text-xs font-bold text-white mt-0.5">{brief.top_category} ({brief.category_counts?.[brief.top_category] || 0})</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex-1">
+                <p className="text-[10px] font-mono text-white/40 uppercase">Aged &gt;48h Unresolved</p>
+                <p className="text-xs font-bold text-[#FFC400] mt-0.5">{brief.overdue_count} tickets</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
       {/* ── KPI Telemetry Cards ────────────────────────────────────────── */}
-      {loading && !overview ? (
+      {(loading || overviewLoading) && !overview && complaints.length === 0 ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[0, 1, 2, 3].map((i) => <SkeletonStat key={i} />)}
+        </div>
+      ) : hasFatalError ? (
+        <div className="bg-[#181111] border border-[#E10600]/40 rounded-3xl p-6 text-center space-y-3">
+          <AlertTriangle className="w-8 h-8 text-[#E10600] mx-auto" />
+          <p className="text-sm font-bold text-white uppercase tracking-wider">DATABASE CONNECTION ERROR</p>
+          <p className="text-xs text-white/50">Unable to reach the authoritative PostgreSQL database. Retrying connection...</p>
+          <button onClick={handleRefreshAll} className="btn-primary py-2 px-4 text-xs font-bold inline-flex items-center gap-2">
+            <RefreshCw className="w-3.5 h-3.5" /> Reconnect Database
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <DashboardCard
             title="Total Complaints"
-            value={overview?.total_complaints ?? total}
+            value={totalCount}
             subtitle="Database records"
             icon={<ClipboardList className="w-6 h-6" />}
             color="muted"
           />
           <DashboardCard
             title="High Priority"
-            value={overview?.high_priority ?? highPriorityCases.length}
+            value={highCount}
             subtitle="Urgent field response"
             icon={<AlertTriangle className="w-6 h-6" />}
             color="red"
           />
           <DashboardCard
             title="Pending Actions"
-            value={overview?.pending ?? pendingCases.length}
+            value={pendingCount}
             subtitle="Active workflows"
             icon={<Clock className="w-6 h-6" />}
             color="yellow"
           />
           <DashboardCard
             title="Resolved"
-            value={overview?.resolved ?? complaints.filter((c) => ['Resolved', 'Closed'].includes(c.status)).length}
+            value={resolvedCount}
             subtitle="Closed out"
             icon={<CheckCircle className="w-6 h-6" />}
             color="green"

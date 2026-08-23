@@ -48,7 +48,7 @@ from auth import (
     CREATE_USERS_TABLE, CREATE_USERS_INDEX,
     ADD_CITIZEN_ID_COLUMN, ADD_CITIZEN_ID_INDEX,
 )
-from database import get_connection, init_db, UPLOADS_COMPLAINTS_DIR
+from database import get_connection, init_db, UPLOADS_COMPLAINTS_DIR, get_database_diagnostics, log_db_operation
 from agent import run_analysis
 from voice_agent import process_voice_call_turn
 from schemas import (
@@ -253,6 +253,7 @@ def login(body: UserLogin):
 
 
 @router.post("/auth/admin/login", response_model=TokenResponse)
+@router.post("/admin/login", response_model=TokenResponse)
 def admin_login(body: AdminLogin):
     clean_email = body.email.strip().strip("'").strip('"').lower()
     clean_password = body.password.strip().strip("'").strip('"')
@@ -664,83 +665,64 @@ def check_duplicate_complaint(body: DuplicateCheckRequest):
         conn.close()
 
 
-def _row_to_map_incident(r) -> dict:
-    d = dict(r) if not isinstance(r, dict) else r
-    created_at = d.get("created_at")
-    if hasattr(created_at, "isoformat"):
-        created_at = created_at.isoformat()
-    return {
-        "id": str(d.get("id") or d.get("complaint_number") or ""),
-        "complaint_number": str(d.get("complaint_number") or d.get("id") or ""),
-        "title": str(d.get("title") or "Civic Incident"),
-        "category": str(d.get("category") or "Other"),
-        "priority": str(d.get("priority") or "MEDIUM"),
-        "status": str(d.get("status") or "Submitted"),
-        "latitude": float(d.get("latitude") or 0.0),
-        "longitude": float(d.get("longitude") or 0.0),
-        "location": str(d.get("location") or "") if d.get("location") else None,
-        "department": str(d.get("department") or "") if d.get("department") else None,
-        "created_at": str(created_at or ""),
-    }
-
-
-@router.get("/public/map/incidents", response_model=list[MapIncident])
-def get_public_map_incidents():
-    """
-    Returns real active incidents with GPS coordinates for map display.
-    Only returns records where status NOT IN ('Resolved', 'Closed').
-    """
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            """
-            SELECT id, complaint_number, title, category, priority, status,
-                   latitude, longitude, location, department, created_at
-            FROM complaints
-            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-              AND status NOT IN ('Resolved', 'Closed')
-            ORDER BY created_at DESC LIMIT 200;
-            """
-        ).fetchall()
-        return [_row_to_map_incident(r) for r in rows]
-    finally:
-        conn.close()
-
-
-@router.get("/admin/map/incidents", response_model=list[MapIncident])
-def get_admin_map_incidents(
+@router.get("/public/map/incidents")
+@router.get("/admin/map/incidents")
+def get_map_incidents(
     include_resolved: bool = Query(False),
     category: Optional[str] = Query(None),
     priority: Optional[str] = Query(None),
-    current_user: dict = Depends(require_admin),
 ):
     """
-    Admin-filtered real map incidents with GPS coordinates.
+    Authoritative query for active map incidents.
+    Returns unresolved complaints (status != Resolved AND status != Closed AND status != Archived)
+    with valid latitude and longitude coordinates.
     """
     conn = get_connection()
     try:
-        where_clauses = ["latitude IS NOT NULL", "longitude IS NOT NULL"]
+        where_clauses = [
+            "latitude IS NOT NULL",
+            "longitude IS NOT NULL",
+            "(latitude != 0 OR longitude != 0)",
+        ]
         params = []
         if not include_resolved:
-            where_clauses.append("status NOT IN ('Resolved', 'Closed')")
-        if category and category.lower() != "all":
-            where_clauses.append("category = ?")
-            params.append(category)
-        if priority and priority.lower() != "all":
-            where_clauses.append("priority = ?")
-            params.append(priority)
+            where_clauses.append("LOWER(status) NOT IN ('resolved', 'closed', 'archived')")
+        if category and category.strip().lower() != "all":
+            where_clauses.append("LOWER(category) = LOWER(?)")
+            params.append(category.strip())
+        if priority and priority.strip().lower() != "all":
+            where_clauses.append("UPPER(priority) = UPPER(?)")
+            params.append(priority.strip())
 
         where_sql = "WHERE " + " AND ".join(where_clauses)
         rows = conn.execute(
             f"""
-            SELECT id, complaint_number, title, category, priority, status,
-                   latitude, longitude, location, department, created_at
+            SELECT id, complaint_number, title, description, category, priority, status,
+                   latitude, longitude, location, landmark, department, evidence_quality, created_at
             FROM complaints {where_sql}
             ORDER BY created_at DESC LIMIT 300;
             """,
             params,
         ).fetchall()
-        return [_row_to_map_incident(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            result.append({
+                "id": d["id"],
+                "complaint_number": d.get("complaint_number") or d["id"],
+                "title": d.get("title") or d.get("description") or "Civic Incident",
+                "description": d.get("description") or "",
+                "category": d.get("category") or "Other",
+                "priority": d.get("priority") or "LOW",
+                "status": d.get("status") or "Submitted",
+                "latitude": float(d["latitude"]),
+                "longitude": float(d["longitude"]),
+                "location": d.get("location") or d.get("landmark") or "",
+                "department": d.get("department") or "",
+                "evidence_quality": d.get("evidence_quality") or "LOW",
+                "created_at": d.get("created_at") or "",
+            })
+        return result
     finally:
         conn.close()
 
@@ -998,6 +980,7 @@ def admin_overview(current_user: dict = Depends(require_admin)):
         critical = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) = 'CRITICAL';").fetchone()[0]
         active_incidents = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND latitude IS NOT NULL AND longitude IS NOT NULL AND (latitude != 0 OR longitude != 0);").fetchone()[0]
 
+        log_db_operation("admin_overview", total)
         return {
             "total_complaints": total,
             "submitted": submitted,
@@ -1015,49 +998,6 @@ def admin_overview(current_user: dict = Depends(require_admin)):
         conn.close()
 
 
-@router.get("/admin/map/incidents")
-@router.get("/public/map/incidents")
-def get_map_incidents():
-    """
-    Authoritative query for active map incidents.
-    Returns unresolved complaints (status != Resolved AND status != Closed AND status != Archived)
-    with valid latitude and longitude coordinates.
-    """
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            """
-            SELECT id, complaint_number, title, description, category, priority, status,
-                   latitude, longitude, location, landmark, department, evidence_quality, created_at
-            FROM complaints
-            WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived')
-              AND latitude IS NOT NULL
-              AND longitude IS NOT NULL
-              AND (latitude != 0 OR longitude != 0)
-            ORDER BY created_at DESC;
-            """
-        ).fetchall()
-        result = []
-        for r in rows:
-            d = dict(r)
-            result.append({
-                "id": d["id"],
-                "complaint_number": d.get("complaint_number") or d["id"],
-                "title": d.get("title") or d.get("description") or "Civic Incident",
-                "description": d.get("description") or "",
-                "category": d.get("category") or "Other",
-                "priority": d.get("priority") or "LOW",
-                "status": d.get("status") or "Submitted",
-                "latitude": float(d["latitude"]),
-                "longitude": float(d["longitude"]),
-                "location": d.get("location") or d.get("landmark") or "",
-                "department": d.get("department") or "",
-                "evidence_quality": d.get("evidence_quality") or "LOW",
-                "created_at": d.get("created_at") or "",
-            })
-        return result
-    finally:
-        conn.close()
 
 
 @router.get("/departments")
@@ -1094,14 +1034,21 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
         pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed');").fetchone()[0]
         resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE status IN ('Resolved', 'Closed');").fetchone()[0]
 
+        now_dt = datetime.now(timezone.utc)
+        today_iso = now_dt.strftime("%Y-%m-%d")
+        hours24_iso = datetime.fromtimestamp(now_dt.timestamp() - 86400, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        hours48_iso = datetime.fromtimestamp(now_dt.timestamp() - 172800, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
         # Recent complaints count
         today_cnt = conn.execute(
-            "SELECT COUNT(*) FROM complaints WHERE created_at >= date('now', 'start of day') OR created_at >= datetime('now', '-24 hours');"
+            "SELECT COUNT(*) FROM complaints WHERE created_at >= ? OR created_at >= ?;",
+            (today_iso, hours24_iso),
         ).fetchone()[0]
 
         # Overdue pending count (aged > 48 hours)
         overdue_cnt = conn.execute(
-            "SELECT COUNT(*) FROM complaints WHERE status NOT IN ('Resolved', 'Closed') AND created_at <= datetime('now', '-48 hours');"
+            "SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND created_at <= ?;",
+            (hours48_iso,),
         ).fetchone()[0]
 
         by_cat_rows = conn.execute("SELECT category, COUNT(*) as cnt FROM complaints GROUP BY category ORDER BY cnt DESC;").fetchall()
@@ -1754,51 +1701,9 @@ def openapi_endpoint():
 @router.get("/health")
 @router.get("/api/health")
 def root_health():
-    conn = None
-    is_postgres = False
-    comp_count = 0
-    user_count = 0
-    try:
-        conn = get_connection()
-        from database import PostgresConnectionWrapper
-        is_postgres = isinstance(conn, PostgresConnectionWrapper)
-        row = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()
-        comp_count = int(row[0]) if row else 0
-        u_row = conn.execute("SELECT COUNT(*) FROM users;").fetchone()
-        user_count = int(u_row[0]) if u_row else 0
-    except Exception as exc:
-        logger.warning("root_health database probe note: %s", exc)
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    has_db_url = bool(
-        os.getenv("DATABASE_URL")
-        or os.getenv("POSTGRES_URL")
-        or os.getenv("POSTGRESQL_URL")
-        or os.getenv("POSTGRES_PRISMA_URL")
-        or os.getenv("POSTGRES_URL_NON_POOLING")
-        or os.getenv("NEON_DATABASE_URL")
-        or os.getenv("SUPABASE_DATABASE_URL")
-    )
-    is_persistent = is_postgres or not bool(os.getenv("VERCEL"))
-
-    return {
-        "status": "healthy",
-        "service": "CivicResolve AI API",
-        "version": "1.0.0",
-        "database_engine": "PostgreSQL" if is_postgres else "SQLite",
-        "database_persistent": is_persistent,
-        "database_host_configured": has_db_url,
-        "users_count": user_count,
-        "complaints_count": comp_count,
-        "total_complaints": comp_count,
-        "total_users": user_count,
-        "environment": "production" if os.getenv("VERCEL") else "development",
-    }
+    diag = get_database_diagnostics()
+    log_db_operation("health_check", diag.get("complaints_count"))
+    return diag
 
 
 if __name__ == "__main__":

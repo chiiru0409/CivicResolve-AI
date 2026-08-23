@@ -1,26 +1,26 @@
 """
-database.py — SQLite connection, table creation, and safe migration.
+database.py — Neon PostgreSQL authoritative database persistence with safe migrations.
 
 Rules:
 - NEVER drops existing tables or deletes existing rows.
 - Uses CREATE TABLE IF NOT EXISTS everywhere.
 - Adds columns with ALTER TABLE only when they are missing (safe migration).
 - Creates indexes after tables are confirmed to exist.
-- All multi-step writes must use explicit transactions (handled in main.py via
-  context managers; connection helper is exposed here).
+- In production (Vercel): STRICTLY uses PostgreSQL (Neon). If DATABASE_URL is missing or fails, FAILS LOUDLY.
+- In local development: Connects to PostgreSQL if DATABASE_URL is set, else uses local database/civic.db.
 """
 
 import sqlite3
 import os
 import logging
 import re
+import urllib.parse
 from pathlib import Path
 from typing import Any, Optional, Dict, List, Union
 
 logger = logging.getLogger(__name__)
 
 # ── Path resolution ────────────────────────────────────────────────────────────
-# backend/ sits inside the project root.  civic.db lives at project_root/database/
 _BACKEND_DIR = Path(__file__).resolve().parent          # …/backend
 _PROJECT_ROOT = _BACKEND_DIR.parent                      # …/CEVIC-RESOLVER-AI--main
 DB_DIR  = _PROJECT_ROOT / "database"
@@ -31,23 +31,82 @@ UPLOADS_DIR            = _PROJECT_ROOT / "uploads"
 UPLOADS_COMPLAINTS_DIR = UPLOADS_DIR / "complaints"
 UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
 
-# In Vercel Serverless environment, local filesystem is read-only except /tmp
-if os.environ.get("VERCEL"):
-    import shutil
-    DB_DIR = Path("/tmp/database")
-    DB_PATH = DB_DIR / "civic.db"
-    UPLOADS_DIR = Path("/tmp/uploads")
-    UPLOADS_COMPLAINTS_DIR = UPLOADS_DIR / "complaints"
-    UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
+try:
+    if os.environ.get("VERCEL"):
+        UPLOADS_DIR = Path("/tmp/uploads")
+        UPLOADS_COMPLAINTS_DIR = UPLOADS_DIR / "complaints"
+        UPLOADS_RESOLUTIONS_DIR = UPLOADS_DIR / "resolutions"
+    UPLOADS_COMPLAINTS_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOADS_RESOLUTIONS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as exc:
+    logger.warning("Uploads directory setup: %s", exc)
+
+
+def is_production() -> bool:
+    """Return True if running in production (Vercel Serverless or production environment)."""
+    return bool(
+        os.getenv("VERCEL")
+        or os.getenv("ENVIRONMENT") == "production"
+        or os.getenv("NODE_ENV") == "production"
+        or os.getenv("PROD")
+    )
+
+
+def _resolve_db_url() -> Optional[str]:
+    """
+    Resolve and clean the PostgreSQL database connection string from environment variables.
+    Canonical variable: DATABASE_URL.
+    """
+    raw_url = (
+        os.getenv("DATABASE_URL")
+        or os.getenv("POSTGRES_URL")
+        or os.getenv("POSTGRESQL_URL")
+        or os.getenv("POSTGRES_PRISMA_URL")
+        or os.getenv("POSTGRES_URL_NON_POOLING")
+        or os.getenv("NEON_DATABASE_URL")
+        or os.getenv("SUPABASE_DATABASE_URL")
+        or os.getenv("database_url")
+        or os.getenv("postgres_url")
+    )
+    if not raw_url:
+        return None
+
+    cleaned = raw_url.strip().strip("'").strip('"')
+    if cleaned.startswith("postgres://"):
+        cleaned = "postgresql://" + cleaned[len("postgres://"):]
+
+    # Ensure sslmode=require for remote / Neon databases if not explicitly specified
+    if "sslmode=" not in cleaned and ("neon.tech" in cleaned or "amazonaws.com" in cleaned or "supabase" in cleaned):
+        separator = "&" if "?" in cleaned else "?"
+        cleaned = f"{cleaned}{separator}sslmode=require"
+
+    return cleaned
+
+
+def get_database_host() -> Optional[str]:
+    """
+    Safely extract and sanitize the database hostname without exposing credentials.
+    Example: 'ep-cool-fog-12345.us-east-2.aws.neon.tech'
+    """
+    url = _resolve_db_url()
+    if not url:
+        return None
     try:
-        DB_DIR.mkdir(parents=True, exist_ok=True)
-        UPLOADS_COMPLAINTS_DIR.mkdir(parents=True, exist_ok=True)
-        UPLOADS_RESOLUTIONS_DIR.mkdir(parents=True, exist_ok=True)
-        bundled_db = _PROJECT_ROOT / "database" / "civic.db"
-        if not DB_PATH.exists() and bundled_db.exists():
-            shutil.copy2(bundled_db, DB_PATH)
-    except Exception as exc:
-        logger.warning("Vercel /tmp directory setup: %s", exc)
+        parsed = urllib.parse.urlparse(url)
+        return parsed.hostname
+    except Exception:
+        return "configured-host"
+
+
+def log_db_operation(operation: str, count: Optional[int] = None) -> None:
+    """Safe diagnostic logging without credentials or secrets."""
+    db_url = _resolve_db_url()
+    engine = "postgresql" if db_url else "sqlite"
+    host = get_database_host() or ("local" if engine == "sqlite" else "unknown")
+    if count is not None:
+        logger.info("[DB] engine=%s host=%s op=%s count=%d", engine, host, operation, count)
+    else:
+        logger.info("[DB] engine=%s host=%s op=%s", engine, host, operation)
 
 
 # ── DDL statements ─────────────────────────────────────────────────────────────
@@ -227,11 +286,11 @@ class RowWrapper(dict):
 
 def _convert_sql_to_postgres(sql: str) -> str:
     pg_sql = sql.replace("?", "%s")
-    pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
-    pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE", pg_sql, flags=re.IGNORECASE)
-    pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')", pg_sql, flags=re.IGNORECASE)
-    pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')", pg_sql, flags=re.IGNORECASE)
-    pg_sql = re.sub(r"datetime\('now'\)", "CURRENT_TIMESTAMP", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"date\('now',\s*'start of day'\)", "CURRENT_DATE::text", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"date\('now'\)", "CURRENT_DATE::text", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+hours'\)", r"(NOW() - INTERVAL '\1 hours')::text", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now',\s*'-(\d+)\s+days'\)", r"(NOW() - INTERVAL '\1 days')::text", pg_sql, flags=re.IGNORECASE)
+    pg_sql = re.sub(r"datetime\('now'\)", "TO_CHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "SERIAL PRIMARY KEY", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"\bAUTOINCREMENT\b", "", pg_sql, flags=re.IGNORECASE)
     pg_sql = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", pg_sql, flags=re.IGNORECASE)
@@ -336,38 +395,103 @@ class PostgresConnectionWrapper:
             self.commit()
 
 
-# ── Public helpers ─────────────────────────────────────────────────────────────
+# ── Public connection helper ───────────────────────────────────────────────────
 
 def get_connection():
     """
     Return an active database connection.
-    If DATABASE_URL or POSTGRES_URL is set, connects to PostgreSQL.
-    Otherwise connects to SQLite.
+    In production (Vercel):
+      - Connects ONLY to PostgreSQL (Neon).
+      - If DATABASE_URL is missing or fails, FAILS LOUDLY without falling back to ephemeral SQLite.
+    In local development:
+      - Connects to PostgreSQL if DATABASE_URL is set; otherwise falls back to local database/civic.db.
     """
-    db_url = (
-        os.getenv("DATABASE_URL")
-        or os.getenv("POSTGRES_URL")
-        or os.getenv("POSTGRESQL_URL")
-        or os.getenv("POSTGRES_PRISMA_URL")
-        or os.getenv("POSTGRES_URL_NON_POOLING")
-        or os.getenv("NEON_DATABASE_URL")
-        or os.getenv("SUPABASE_DATABASE_URL")
-    )
+    db_url = _resolve_db_url()
+    is_prod = is_production()
+
     if db_url and db_url.startswith(("postgres://", "postgresql://")):
         try:
             import psycopg2
-            # Handle sslmode parameter for secure cloud hosts
             conn = psycopg2.connect(db_url)
+            conn.autocommit = True
             return PostgresConnectionWrapper(conn)
         except Exception as exc:
-            logger.error("PostgreSQL connection error, falling back to SQLite: %s", exc)
+            logger.error("PostgreSQL connection error: %s", exc)
+            if is_prod:
+                raise RuntimeError(
+                    f"CRITICAL: Failed to connect to PostgreSQL in production database configuration: {exc}. "
+                    "Ephemeral SQLite fallback is strictly disabled in production."
+                ) from exc
+            logger.warning("Local development: falling back to SQLite because PostgreSQL failed.")
+    elif is_prod:
+        raise RuntimeError(
+            "CRITICAL: DATABASE_URL is not configured in production environment. "
+            "Ephemeral SQLite fallback is strictly disabled in production to guarantee data consistency across lambdas."
+        )
 
+    # Local development SQLite connection
+    DB_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute("PRAGMA busy_timeout=5000;")
     return conn
+
+
+def get_database_diagnostics() -> dict:
+    """
+    Perform a safe diagnostic probe of the database.
+    Exposes safe telemetry without private keys, passwords, or full URLs.
+    """
+    is_prod = is_production()
+    db_url = _resolve_db_url()
+    has_db_url = bool(db_url)
+    host = get_database_host()
+    engine = "Unknown"
+    persistent = False
+    users_count = 0
+    complaints_count = 0
+    error_msg = None
+
+    conn = None
+    try:
+        conn = get_connection()
+        is_pg = isinstance(conn, PostgresConnectionWrapper)
+        engine = "PostgreSQL" if is_pg else "SQLite"
+        persistent = is_pg or not is_prod
+
+        u_row = conn.execute("SELECT COUNT(*) FROM users;").fetchone()
+        users_count = int(u_row[0]) if u_row else 0
+
+        c_row = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()
+        complaints_count = int(c_row[0]) if c_row else 0
+    except Exception as exc:
+        error_msg = str(exc)
+        engine = "Configuration Error"
+        persistent = False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return {
+        "status": "healthy" if error_msg is None else "unhealthy",
+        "service": "CivicResolve AI API",
+        "version": "1.0.0",
+        "database_engine": engine,
+        "database_persistent": persistent,
+        "database_host_configured": has_db_url,
+        "database_host": host or ("localhost/sqlite" if engine == "SQLite" else None),
+        "users_count": users_count,
+        "complaints_count": complaints_count,
+        "total_complaints": complaints_count,
+        "total_users": users_count,
+        "environment": "production" if is_prod else "development",
+        "error": error_msg,
+    }
 
 
 def _column_exists(conn, table: str, column: str) -> bool:
@@ -410,8 +534,8 @@ def init_db() -> None:
     4. Create indexes.
     5. Seed departments if table is empty.
     """
-    # --- directories ---
-    DB_DIR.mkdir(parents=True, exist_ok=True)
+    if not is_production():
+        DB_DIR.mkdir(parents=True, exist_ok=True)
     UPLOADS_COMPLAINTS_DIR.mkdir(parents=True, exist_ok=True)
     UPLOADS_RESOLUTIONS_DIR.mkdir(parents=True, exist_ok=True)
 

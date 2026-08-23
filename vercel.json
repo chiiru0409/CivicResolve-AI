@@ -63,6 +63,22 @@
       "destination": "/api"
     },
     {
+      "source": "/admin/overview",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/complaints",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/login",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/departments",
+      "destination": "/api"
+    },
+    {
       "source": "/admin/ai/(.*)",
       "destination": "/api"
     },
