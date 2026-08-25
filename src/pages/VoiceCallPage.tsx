@@ -350,6 +350,29 @@ export default function VoiceCallPage() {
             </div>
           </div>
 
+          {/* ── Voice AI Pipeline Progression Steps ────────────────────────── */}
+          <div className="bg-[#111]/80 border border-white/10 rounded-2xl px-4 py-3 flex items-center justify-between text-[10px] font-mono text-white/50 overflow-x-auto gap-2">
+            {[
+              { label: 'VOICE', active: stage === 'greeting' || stage === 'problem' || isAiSpeaking || isUserListening },
+              { label: 'UNDERSTAND', active: stage === 'problem' || stage === 'location' || stage === 'landmark' || stage === 'confirm' || stage === 'submitted' },
+              { label: 'CLASSIFY', active: stage === 'location' || stage === 'landmark' || stage === 'confirm' || stage === 'submitted' },
+              { label: 'CONFIRM', active: stage === 'confirm' || stage === 'submitted' },
+              { label: 'SUBMIT', active: stage === 'confirm' && isProcessing || stage === 'submitted' },
+              { label: 'TICKET CREATED', active: stage === 'submitted' && !!createdComplaint },
+            ].map((step, idx, arr) => (
+              <div key={step.label} className="flex items-center gap-1.5 whitespace-nowrap">
+                <span className={`px-2 py-1 rounded-md transition-all font-bold ${
+                  step.active
+                    ? 'bg-[#E10600]/20 text-[#E10600] border border-[#E10600]/40 shadow-[0_0_8px_rgba(225,6,0,0.3)]'
+                    : 'bg-white/5 text-white/40 border border-white/5'
+                }`}>
+                  {step.label}
+                </span>
+                {idx < arr.length - 1 && <span className="text-white/20">→</span>}
+              </div>
+            ))}
+          </div>
+
           {/* ── Center Stage: Radar Visualizer & Status ────────────────── */}
           <div className="bg-[#0D0D0D] border border-white/10 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center relative overflow-hidden min-h-[280px] shadow-2xl">
             {/* Top red specular line */}

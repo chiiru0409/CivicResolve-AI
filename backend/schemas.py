@@ -327,6 +327,7 @@ class ChatResponse(BaseModel):
     suggest_complaint: bool = False
     quick_replies: list[str] = Field(default_factory=list)
     analysis_card: Optional[dict] = None
+    complaint_data: Optional[dict] = None
 
 
 # ══════════════════════════════════════════════════════════════

@@ -98,6 +98,7 @@ export default function AdminAIAssistant() {
         });
       }
       setConfirmedActions((prev) => new Set([...prev, actionKey]));
+      window.dispatchEvent(new CustomEvent('complaints:updated'));
     } catch {
       // ignore
     } finally {

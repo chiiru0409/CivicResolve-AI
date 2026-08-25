@@ -247,13 +247,36 @@ const AIAnalysisPage: React.FC = () => {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-[#FFC400]/10 border border-[#FFC400]/30 rounded-2xl p-4 mb-4 flex items-start gap-3"
+                className="bg-[#FFC400]/10 border border-[#FFC400]/30 rounded-2xl p-4 mb-4"
               >
-                <AlertTriangle className="w-5 h-5 text-[#FFC400] flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-bold text-[#FFC400] font-display">Potential Duplicate Incident Detected</p>
-                  <p className="text-xs text-white/80 mt-1 leading-relaxed font-sans">{duplicateInfo.explanation}</p>
-                  <p className="text-[11px] text-white/50 mt-1 font-mono">You may still proceed with submission if this represents a new recurrence or separate location.</p>
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-[#FFC400] flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="text-sm font-bold text-[#FFC400] font-display">Geospatial Duplicate Match ({duplicateInfo.similarity_percentage}%)</p>
+                      {duplicateInfo.existing_complaint_id && (
+                        <span className="telemetry-chip font-mono text-[10px] text-[#FFC400]">
+                          ACTIVE #{duplicateInfo.existing_complaint_id}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-white/80 mt-1 leading-relaxed font-sans">{duplicateInfo.explanation}</p>
+                    <p className="text-[11px] text-white/50 mt-1 font-mono">You can choose to follow the active municipal ticket or file this as an independent report.</p>
+
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      {duplicateInfo.existing_complaint_id && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/track?id=${duplicateInfo.existing_complaint_id}`)}
+                          className="text-xs bg-[#FFC400]/20 hover:bg-[#FFC400]/30 text-[#FFC400] border border-[#FFC400]/40 font-mono font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                        >
+                          <span>Follow Existing Ticket (#{duplicateInfo.existing_complaint_id})</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <span className="text-[11px] text-white/40 font-mono">or continue creating new complaint below</span>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}

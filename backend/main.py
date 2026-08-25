@@ -1659,36 +1659,127 @@ def llm_status():
 
 
 @router.post("/chat", response_model=ChatResponse)
-def handle_chat(body: ChatRequest):
+def handle_chat(
+    body: ChatRequest,
+    authorization: Optional[str] = Header(None),
+):
     """
     Intelligent chatbot endpoint for civic complaints.
-    Connects to Ollama (qwen2.5:3b) with grounding in CivicResolve's departments,
-    and falls back to deterministic civic routing when LLM is unavailable.
+    Provides natural language understanding, multi-turn conversational intake,
+    contextual complaint tracking, and grounded SLA analysis.
     """
     import re
     from classifier import classify, get_department_for_category, CATEGORY_KEYWORDS
-    from priority import detect_priority
+    from priority import detect_priority, calculate_severity, get_estimated_response
 
     user_msg = body.message.strip()
     lower = user_msg.lower()
 
-    # 1. Check for Complaint ID tracking
+    citizen_id = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            from jose import jwt
+            from auth import SECRET_KEY, ALGORITHM
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("role") == "citizen":
+                citizen_id = int(payload.get("sub"))
+        except Exception:
+            pass
+
+    # 1. Contextual Complaint Tracking & Status Lookups
     id_match = re.search(r"CR-\d{4}-\d{4,8}", user_msg, re.IGNORECASE)
-    if id_match:
-        cid = id_match.group(0).upper()
-        return ChatResponse(
-            message=f"I found Complaint ID **{cid}**.\n\nYou can track the full status timeline on the **Track Complaint** page.",
-            quick_replies=[f"Track {cid}", "Report a new issue"],
-            suggest_complaint=False,
-        )
+    is_track_intent = (
+        bool(id_match)
+        or any(w in lower for w in [
+            "where is my complaint", "status of", "check my complaint", "track complaint",
+            "track my complaint", "why is my complaint", "why hasn't it been resolved",
+            "why hasnt it been resolved", "when was it assigned", "which department is handling",
+            "what should i do if the issue is still there", "issue is still there", "remind"
+        ])
+    )
+
+    if is_track_intent:
+        conn = get_connection()
+        try:
+            target_complaint = None
+            if id_match:
+                cid = id_match.group(0).upper()
+                row = conn.execute("SELECT * FROM complaints WHERE complaint_number = ? OR id = ?;", (cid, cid)).fetchone()
+                if row:
+                    target_complaint = dict(row)
+            elif citizen_id is not None:
+                row = conn.execute("SELECT * FROM complaints WHERE citizen_id = ? ORDER BY created_at DESC LIMIT 1;", (citizen_id,)).fetchone()
+                if row:
+                    target_complaint = dict(row)
+
+            if target_complaint:
+                c_num = target_complaint["complaint_number"]
+                c_cat = target_complaint.get("category", "Civic Issue")
+                c_stat = target_complaint.get("status", "Submitted")
+                c_dept = target_complaint.get("department", "Municipal Operations")
+                c_prio = target_complaint.get("priority", "MEDIUM")
+                c_team = target_complaint.get("assigned_team") or target_complaint.get("assigned_officer") or "Municipal Dispatch Squad"
+                c_sla = target_complaint.get("estimated_response") or ("24 hours" if c_prio in ("HIGH", "CRITICAL") else "48-72 hours")
+                c_loc = target_complaint.get("location", "the reported site")
+
+                updates = _fetch_updates(conn, target_complaint["id"])
+                assigned_upd = next((u for u in updates if u.get("status") == "Assigned"), None)
+                assigned_time = assigned_upd.get("created_at") if assigned_upd else target_complaint.get("created_at")
+
+                if "why" in lower and "resolved" in lower:
+                    explanation = (
+                        f"Complaint **{c_num}** ({c_cat}) is currently in **{c_stat}** stage with {c_dept}.\n\n"
+                        f"Field operations are scheduled within the **{c_sla}** SLA window. "
+                        f"Assigned team **{c_team}** was deployed following on-site safety priority guidelines."
+                    )
+                elif "when" in lower or "assigned" in lower or "which department" in lower:
+                    explanation = (
+                        f"Complaint **{c_num}** was routed to **{c_dept}**.\n\n"
+                        f"• **Assigned Unit**: {c_team}\n"
+                        f"• **Assigned Timestamp**: {assigned_time[:16] if assigned_time else 'Active queue'}\n"
+                        f"• **SLA Target**: {c_sla}\n"
+                        f"• **Current Status**: `{c_stat}`"
+                    )
+                elif "still there" in lower or "persist" in lower or "what should i do" in lower:
+                    explanation = (
+                        f"If the issue at **{c_loc}** is worsening or still unresolved, "
+                        f"you can send a priority reminder from the **Track Complaint** page or contact the AI Helpline at 1800-CIVIC-AI for emergency escalation."
+                    )
+                else:
+                    explanation = (
+                        f"Here is the live status for **{c_num}**:\n\n"
+                        f"• **Status**: `{c_stat}`\n"
+                        f"• **Category**: {c_cat} ({c_prio} Priority)\n"
+                        f"• **Handling Department**: {c_dept}\n"
+                        f"• **Assigned Unit**: {c_team}\n"
+                        f"• **SLA Target**: {c_sla}\n"
+                        f"• **Location**: {c_loc}"
+                    )
+
+                return ChatResponse(
+                    message=explanation,
+                    quick_replies=[f"Track {c_num} Details", "Why is it taking time?", "Report a new issue"],
+                    suggest_complaint=False,
+                )
+            elif id_match:
+                return ChatResponse(
+                    message=f"I checked the municipal database, but could not find Complaint ID **{id_match.group(0).upper()}**. Please check the ID format (e.g. `CR-2026-004821`).",
+                    quick_replies=["Track a complaint", "Report a problem"],
+                    suggest_complaint=False,
+                )
+        finally:
+            conn.close()
 
     # 2. Extract classification keywords and domain info
     has_civic_keywords = any(kw in lower for kws in CATEGORY_KEYWORDS.values() for kw in kws)
     category = classify(user_msg)
     priority = detect_priority(user_msg)
+    severity = calculate_severity(priority, user_msg)
     _, dept_name = get_department_for_category(category)
+    est_sla = get_estimated_response(priority)
 
-    # 3. Call local LLM (Ollama)
+    # 3. Call local LLM (Ollama) if available
     llm_resp = None
     try:
         from llm import chat_with_llm
@@ -1698,6 +1789,7 @@ def handle_chat(body: ChatRequest):
 
     if llm_resp and len(llm_resp.strip()) > 5:
         analysis_card = None
+        complaint_data = None
         suggest_complaint = False
         if has_civic_keywords and category != "Other":
             suggest_complaint = True
@@ -1706,6 +1798,16 @@ def handle_chat(body: ChatRequest):
                 "priority": priority,
                 "department": dept_name,
                 "confidence": 92,
+                "severity": severity,
+                "estimatedResponse": est_sla,
+            }
+            complaint_data = {
+                "description": user_msg,
+                "category": category,
+                "priority": priority,
+                "department": dept_name,
+                "title": f"{priority.title()} Priority {category} Report",
+                "location": "Reported via Civic AI Chat",
             }
 
         quick_replies = ["File Complaint", "Track a complaint", "How does this work?"] if suggest_complaint else ["Report a problem", "Track my complaint", "Common issues"]
@@ -1715,18 +1817,19 @@ def handle_chat(body: ChatRequest):
             suggest_complaint=suggest_complaint,
             quick_replies=quick_replies,
             analysis_card=analysis_card,
+            complaint_data=complaint_data,
         )
 
     # 4. Fallback Rule-Based Civic Engine
     if re.search(r"^(hi|hello|hey|good morning|good evening|namaste|hai|helo)\b", lower):
         return ChatResponse(
-            message="Hi there! 👋 I'm **Civic AI**, your intelligent assistant for municipal complaints.\n\nI can help you describe an issue, identify the right department, or track an existing complaint.\n\nWhat would you like to do?",
+            message="Hi there! 👋 I'm **Civic AI**, your intelligent assistant for municipal complaints.\n\nI can help you report an issue, identify the right department, or track an existing complaint.\n\nWhat would you like to do?",
             quick_replies=["Report a problem", "Track my complaint", "How does this work?", "Common issues"],
         )
 
     if "how does this work" in lower or "how it works" in lower or "help" in lower or "what can you do" in lower:
         return ChatResponse(
-            message="Here is how **CivicResolve AI** works:\n\n**1. Report** — Describe your civic issue + photo + location.\n**2. AI Analyzes** — Automatically classifies category, priority, and routes to the right department.\n**3. Track** — Get a unique ID like `CR-2026-XXXXXX` to follow progress in real time.\n**4. Resolve** — Municipal team resolves the issue and updates the timeline.\n\nWhat would you like to do?",
+            message="Here is how **CivicResolve AI** works:\n\n**1. Report** — Describe your civic issue + optional photo proof + location.\n**2. AI Analyzes** — Automatically classifies category, priority, and routes to the right department.\n**3. Track** — Get a unique ID like `CR-2026-XXXXXX` to follow progress in real time.\n**4. Resolve** — Municipal team resolves the issue and updates the timeline.\n\nWhat would you like to do?",
             quick_replies=["Report a problem", "Track my complaint", "What issues can I report?"],
         )
 
@@ -1735,22 +1838,47 @@ def handle_chat(body: ChatRequest):
         cat = classify(hist_text)
         _, dept = get_department_for_category(cat)
         return ChatResponse(
-            message=f"This complaint should be routed to the **{dept}**.",
+            message=f"This complaint will be routed directly to the **{dept}**.",
             quick_replies=["File Complaint", "Track my complaint", "Report another issue"],
             suggest_complaint=True,
         )
 
     if has_civic_keywords or category != "Other":
+        # Check if location was mentioned in the user message or conversation history
+        combined_text = " ".join(h.content for h in body.history) + " " + user_msg
+        loc_words = ["road", "street", "near", "opposite", "beside", "behind", "layout", "colony", "nagar", "ward", "cross", "main", "junction", "sector"]
+        has_location = any(w in combined_text.lower() for w in loc_words)
+
+        if not has_location and len(body.history) < 2:
+            return ChatResponse(
+                message=f"I understand this is a **{category}** issue. I can help report this.\n\n**Where exactly is this occurring?** (e.g. street name, landmark, or area).",
+                quick_replies=["Near my apartment", "On the main road", "Near the bus stop"],
+                suggest_complaint=False,
+            )
+
+        card = {
+            "category": category,
+            "priority": priority,
+            "department": dept_name,
+            "confidence": 92,
+            "severity": severity,
+            "estimatedResponse": est_sla,
+        }
+        c_data = {
+            "description": user_msg,
+            "category": category,
+            "priority": priority,
+            "department": dept_name,
+            "title": f"{priority.title()} Priority {category} Report",
+            "location": "Reported via Civic AI Chat",
+        }
+
         return ChatResponse(
-            message=f"That appears to be a **{category}** civic issue. You can report it through the official complaint form, and our system will route it directly to the **{dept_name}**.",
+            message=f"✅ **AI Classification Complete**\n\nIdentified **{category}** issue routed to **{dept_name}** with **{priority}** priority (SLA target: {est_sla}).\n\nClick **File Complaint** below to register your ticket immediately.",
             suggest_complaint=True,
-            quick_replies=["File Complaint", "Which department handles it?", "Track a complaint"],
-            analysis_card={
-                "category": category,
-                "priority": priority,
-                "department": dept_name,
-                "confidence": 88,
-            },
+            quick_replies=["File Complaint", "Track my complaint", "Report another issue"],
+            analysis_card=card,
+            complaint_data=c_data,
         )
 
     return ChatResponse(

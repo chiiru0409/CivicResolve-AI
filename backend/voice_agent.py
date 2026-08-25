@@ -229,8 +229,56 @@ def process_voice_call_turn(
             "complaint": None,
         }
 
+    # ── Tracking / Status Query via Voice ──────────────────────────────────────
+    id_match = re.search(r"CR-\d{4}-\d{4,8}", msg, re.IGNORECASE)
+    is_track_query = bool(id_match) or any(w in msg.lower() for w in ["track", "where is my complaint", "status of my complaint", "status of complaint", "check my complaint", "check status"])
+    if is_track_query and stage != "confirm":
+        conn = get_connection()
+        try:
+            target_complaint = None
+            if id_match:
+                cid = id_match.group(0).upper()
+                row = conn.execute("SELECT * FROM complaints WHERE complaint_number = ? OR id = ?;", (cid, cid)).fetchone()
+                if row:
+                    target_complaint = dict(row)
+            elif citizen_id is not None:
+                row = conn.execute("SELECT * FROM complaints WHERE citizen_id = ? ORDER BY created_at DESC LIMIT 1;", (citizen_id,)).fetchone()
+                if row:
+                    target_complaint = dict(row)
+
+            if target_complaint:
+                c_num = target_complaint["complaint_number"]
+                c_cat = target_complaint.get("category", "Civic issue")
+                c_stat = target_complaint.get("status", "Submitted")
+                c_dept = target_complaint.get("department", "Municipal Operations")
+                c_loc = target_complaint.get("location", "the reported sector")
+                
+                reply = (
+                    f"I located Complaint ID {c_num}. "
+                    f"This {c_cat} report at {c_loc} is currently in {c_stat} status, "
+                    f"assigned to {c_dept}. "
+                    f"Would you like to report another issue or track another ticket?"
+                )
+                return {
+                    "reply_text": reply,
+                    "stage": "tracking",
+                    "extracted_data": data,
+                    "action": "speak",
+                    "complaint": target_complaint,
+                }
+            elif id_match:
+                return {
+                    "reply_text": f"I searched the municipal database, but could not find Complaint ID {id_match.group(0).upper()}. Please state your complaint number again or describe a problem you wish to report.",
+                    "stage": "problem",
+                    "extracted_data": data,
+                    "action": "speak",
+                    "complaint": None,
+                }
+        finally:
+            conn.close()
+
     # ── Stage 1: Problem Description ──────────────────────────────────────────
-    if stage == "problem":
+    if stage in ("problem", "tracking"):
         if not msg:
             return {
                 "reply_text": "I'm listening. Please describe what problem you are observing in your area.",
