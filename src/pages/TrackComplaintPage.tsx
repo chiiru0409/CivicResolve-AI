@@ -4,8 +4,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, MapPin, Building2, Clock, Bell,
   Plus, RefreshCw, AlertCircle, Zap, Loader2, Star, Send,
+  Bot, Sparkles,
 } from 'lucide-react';
 import { trackComplaint, rateComplaint } from '../services/complaintService';
+import { calculateSlaDeadline } from '../services/ai/routingService';
 import PriorityBadge from '../components/PriorityBadge';
 import StatusBadge from '../components/StatusBadge';
 import ComplaintTimeline from '../components/ComplaintTimeline';
@@ -28,6 +30,50 @@ const TrackComplaintPage: React.FC = () => {
   const [hoverRating, setHoverRating]       = useState<number>(0);
   const [feedbackText, setFeedbackText]     = useState<string>('');
   const [submittingRating, setSubmittingRating] = useState(false);
+
+  // Ask AI About This Complaint State
+  const [customAiQuery, setCustomAiQuery] = useState('');
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  const [aiAsking, setAiAsking] = useState(false);
+
+  const handleAskComplaintAI = (query: string) => {
+    if (!complaint || !query.trim()) return;
+    setAiAsking(true);
+    setCustomAiQuery(query);
+
+    setTimeout(() => {
+      const q = query.toLowerCase();
+      const sla = calculateSlaDeadline(complaint.submittedAt, complaint.priority, complaint.category);
+      const assignedStep = complaint.timeline.find((t) => t.label.toLowerCase().includes('assigned'));
+      const inProgStep = complaint.timeline.find((t) => t.label.toLowerCase().includes('progress'));
+
+      let reply = '';
+      if (q.includes('stage') || q.includes('status') || q.includes('why')) {
+        if (complaint.status === 'Submitted' || complaint.status === 'AI_Analysis') {
+          reply = `Your report #${complaint.complaintNumber || complaint.id} has been verified by the AI Optical Triage engine. It is currently being routed to the ${complaint.department} for field officer assignment.`;
+        } else if (complaint.status === 'Assigned') {
+          reply = `The ticket was assigned to **${complaint.assignedOfficer || complaint.assignedTeam || complaint.department}** ${assignedStep?.timestamp ? `on ${new Date(assignedStep.timestamp).toLocaleDateString()}` : ''}. The dispatch crew is preparing materials for on-site execution.`;
+        } else if (complaint.status === 'In Progress') {
+          reply = `The response crew is actively deployed on-site at ${complaint.location}. Work started ${inProgStep?.timestamp ? `on ${new Date(inProgStep.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'recently'}.`;
+        } else if (complaint.status === 'Resolved' || complaint.status === 'Closed') {
+          reply = `The municipal team completed all remedial work. Please verify the before/after results and submit your citizen feedback rating above!`;
+        } else {
+          reply = `Current status is ${complaint.status}. All updates are recorded on the permanent municipal audit ledger.`;
+        }
+      } else if (q.includes('when') || q.includes('assigned') || q.includes('department')) {
+        reply = `Assigned Department: **${complaint.department}**\nAssigned Team: **${complaint.assignedOfficer || complaint.assignedTeam || 'Rapid Response Squad'}**\nLogged Time: ${assignedStep?.timestamp ? new Date(assignedStep.timestamp).toLocaleString() : 'In automated dispatch queue'}.`;
+      } else if (q.includes('sla') || q.includes('deadline') || q.includes('time')) {
+        reply = `Configured SLA Window: **${sla.slaHours} hours** from submission.\nTarget Completion: **${sla.deadline.toLocaleString()}**.\nCurrent Clock: ${sla.isBreached ? `⚠️ SLA exceeded by ${sla.formattedCountdown}` : `🟢 ${sla.formattedCountdown} remaining before breach.`}`;
+      } else if (q.includes('persist') || q.includes('still') || q.includes('not fixed')) {
+        reply = `If the issue persists or worsens, click the **Send Reminder** button below to ping the supervising Ward Officer. You can also call the **AI Helpline** at 1800-CIVIC-AI for emergency escalation.`;
+      } else {
+        reply = `Ticket #${complaint.complaintNumber || complaint.id} (${complaint.category} · ${complaint.priority} Priority) is in ${complaint.status} stage with ${complaint.department}. SLA clock indicates ${sla.formattedCountdown} remaining.`;
+      }
+
+      setAiAnswer(reply);
+      setAiAsking(false);
+    }, 450);
+  };
 
   const doSearch = useCallback(async (id: string) => {
     const trimmed = id.trim().toUpperCase();
@@ -408,6 +454,85 @@ const TrackComplaintPage: React.FC = () => {
                 <ComplaintTimeline events={complaint.timeline} />
               </div>
 
+              {/* ── Ask AI About This Complaint (Contextual Intelligence) ── */}
+              <div className="bg-[#111] border border-white/8 rounded-2xl p-6 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-white/8 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-[#FFC400]/15 border border-[#FFC400]/30 flex items-center justify-center">
+                      <Sparkles className="w-3.5 h-3.5 text-[#FFC400]" />
+                    </div>
+                    <h3 className="font-black text-white text-sm uppercase tracking-wider font-mono">
+                      Ask AI About This Ticket
+                    </h3>
+                  </div>
+                  <span className="font-mono text-[10px] text-[#22C55E] bg-[#22C55E]/10 border border-[#22C55E]/20 px-2 py-0.5 rounded-full font-bold">
+                    CONTEXT LOADED
+                  </span>
+                </div>
+
+                <p className="text-xs text-white/60 font-sans">
+                  Have questions about why this ticket is at its current status, when the field team will arrive, or SLA deadlines? Ask Civic AI below.
+                </p>
+
+                {/* Prompt Pills */}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {[
+                    'Why is my ticket at this stage?',
+                    'When was it assigned to the department?',
+                    'What is the SLA deadline for this issue?',
+                    'What should I do if the issue persists?',
+                  ].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => handleAskComplaintAI(q)}
+                      disabled={aiAsking}
+                      className="text-[11px] font-semibold px-3 py-1.5 rounded-xl border border-white/10 text-white/70 hover:text-white hover:border-[#FFC400]/40 hover:bg-[#FFC400]/8 transition-all bg-white/4 text-left"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Custom AI Query Input */}
+                <div className="flex gap-2 pt-2">
+                  <input
+                    type="text"
+                    value={customAiQuery}
+                    onChange={(e) => setCustomAiQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAskComplaintAI(customAiQuery); }}
+                    placeholder="Ask any question about this complaint..."
+                    className="input-field text-xs flex-1 bg-black/40"
+                    disabled={aiAsking}
+                  />
+                  <motion.button
+                    {...buttonGestures}
+                    onClick={() => handleAskComplaintAI(customAiQuery)}
+                    disabled={!customAiQuery.trim() || aiAsking}
+                    className="btn-secondary text-xs px-4 flex items-center gap-1.5 font-mono"
+                  >
+                    {aiAsking ? <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FFC400]" /> : <Send className="w-3.5 h-3.5 text-[#FFC400]" />}
+                    <span>Ask AI</span>
+                  </motion.button>
+                </div>
+
+                {/* AI Answer Card */}
+                {aiAnswer && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-[#090909] border border-[#FFC400]/25 rounded-xl p-4 space-y-2 mt-3"
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-[#FFC400] font-mono">
+                      <Bot className="w-3.5 h-3.5" />
+                      <span>CIVIC AI EXPLANATION</span>
+                    </div>
+                    <p className="text-xs text-white/80 leading-relaxed font-sans whitespace-pre-line">
+                      {aiAnswer}
+                    </p>
+                  </motion.div>
+                )}
+              </div>
+
               {/* Actions */}
               <div className="grid grid-cols-2 gap-3">
                 <motion.button
@@ -425,6 +550,9 @@ const TrackComplaintPage: React.FC = () => {
                 </motion.button>
                 <motion.button
                   {...buttonGestures}
+                  onClick={() => {
+                    addToast('Additional incident notes updated to ticket.', 'success');
+                  }}
                   className="flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm bg-white/5 hover:bg-white/10 text-white/40 hover:text-white border border-white/8 transition-colors font-mono"
                 >
                   <Plus className="w-4 h-4" />

@@ -119,7 +119,7 @@ const AIChat: React.FC = () => {
 
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const res     = await getChatResponse(trimmed, history);
+      const res     = await getChatResponse(trimmed, history, user?.email);
 
       // Handle quick-reply shortcut: go to track page
       if (trimmed.toLowerCase().includes('go to track') || (trimmed.toUpperCase().startsWith('TRACK CR-'))) {
@@ -151,13 +151,13 @@ const AIChat: React.FC = () => {
       setMessages((prev) => [...prev, {
         id:        (Date.now() + 1).toString(),
         role:      'assistant',
-        content:   'Unable to connect right now. Please try again.',
+        content:   'AI service connection unavailable. Please check your network or try again in a moment.',
         timestamp: new Date().toISOString(),
       }]);
     } finally {
       setLoading(false);
     }
-  }, [loading, messages, navigate, open]);
+  }, [loading, messages, navigate, open, user?.email]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -440,10 +440,16 @@ const AIChat: React.FC = () => {
                     <div className="w-7 h-7 rounded-full bg-[#E10600]/15 border border-[#E10600]/25 flex items-center justify-center flex-shrink-0 mt-0.5">
                       <Bot className="w-3.5 h-3.5 text-[#E10600]" />
                     </div>
-                    <div className="bg-white/6 border border-white/8 rounded-2xl rounded-tl-sm px-4 py-3.5 flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-white/40 typing-dot" />
-                      <div className="w-2 h-2 rounded-full bg-white/40 typing-dot" />
-                      <div className="w-2 h-2 rounded-full bg-white/40 typing-dot" />
+                    <div className="bg-white/6 border border-white/8 rounded-2xl rounded-tl-sm px-3.5 py-2.5 flex flex-col gap-1">
+                      <div className="flex items-center gap-1.5 font-mono text-[9px] text-[#FFC400] font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#FFC400] animate-pulse" />
+                        AI ANALYZING // TEXT → CLASSIFY → ROUTING
+                      </div>
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/40 typing-dot" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/40 typing-dot" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/40 typing-dot" />
+                      </div>
                     </div>
                   </div>
                 )}
