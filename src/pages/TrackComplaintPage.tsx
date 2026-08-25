@@ -3,9 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, MapPin, Building2, Clock, Bell,
-  Plus, RefreshCw, AlertCircle, Zap, Loader2,
+  Plus, RefreshCw, AlertCircle, Zap, Loader2, Star, Send,
 } from 'lucide-react';
-import { trackComplaint } from '../services/complaintService';
+import { trackComplaint, rateComplaint } from '../services/complaintService';
 import PriorityBadge from '../components/PriorityBadge';
 import StatusBadge from '../components/StatusBadge';
 import ComplaintTimeline from '../components/ComplaintTimeline';
@@ -24,6 +24,10 @@ const TrackComplaintPage: React.FC = () => {
   const [notFound, setNotFound]     = useState(false);
   const [loading, setLoading]       = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
+  const [selectedRating, setSelectedRating] = useState<number>(0);
+  const [hoverRating, setHoverRating]       = useState<number>(0);
+  const [feedbackText, setFeedbackText]     = useState<string>('');
+  const [submittingRating, setSubmittingRating] = useState(false);
 
   const doSearch = useCallback(async (id: string) => {
     const trimmed = id.trim().toUpperCase();
@@ -41,6 +45,28 @@ const TrackComplaintPage: React.FC = () => {
       setLoading(false);
     }
   }, []);
+
+  const handleSubmitRating = async () => {
+    if (!complaint || selectedRating < 1 || selectedRating > 5) return;
+    setSubmittingRating(true);
+    try {
+      const res = await rateComplaint(complaint.complaintNumber || complaint.id, selectedRating, feedbackText);
+      addToast('Thank you! Your resolution rating has been submitted.', 'success');
+      setComplaint((prev) => prev ? {
+        ...prev,
+        citizenRating: selectedRating,
+        citizenFeedback: feedbackText.trim() || undefined,
+        ratedAt: res.rated_at,
+      } : prev);
+      setSelectedRating(0);
+      setFeedbackText('');
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : 'Failed to submit rating.';
+      addToast(msg, 'error');
+    } finally {
+      setSubmittingRating(false);
+    }
+  };
 
   // Auto-search when URL param is present
   useEffect(() => {
@@ -256,11 +282,122 @@ const TrackComplaintPage: React.FC = () => {
 
                 {/* Resolved banner */}
                 {['Resolved', 'Closed'].includes(complaint.status) && (
-                  <div className="mt-4 bg-[#22C55E]/10 border border-[#22C55E]/20 rounded-xl p-3 flex items-center gap-2">
-                    <div className="w-4 h-4 text-[#22C55E] flex-shrink-0">✓</div>
-                    <p className="text-xs font-bold text-[#22C55E] font-sans">
-                      Issue resolved{complaint.updatedAt ? ` on ${formatDate(complaint.updatedAt)}` : ''}.
-                    </p>
+                  <div className="mt-4 space-y-3">
+                    <div className="bg-[#22C55E]/10 border border-[#22C55E]/20 rounded-xl p-3 flex items-center gap-2">
+                      <div className="w-4 h-4 text-[#22C55E] flex-shrink-0 font-bold">✓</div>
+                      <p className="text-xs font-bold text-[#22C55E] font-sans">
+                        Issue resolved{complaint.updatedAt ? ` on ${formatDate(complaint.updatedAt)}` : ''}.
+                      </p>
+                    </div>
+
+                    {/* Post-Resolution Citizen Rating Card */}
+                    <div className="bg-[#141414] border border-white/10 rounded-xl p-4 shadow-lg">
+                      <div className="flex items-center justify-between gap-2 mb-3 pb-2 border-b border-white/8">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-[#FFC400] font-mono">
+                          <Star className="w-3.5 h-3.5 fill-[#FFC400]" />
+                          <span>CITIZEN RESOLUTION RATING</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-white/40">
+                          {complaint.citizenRating ? 'RATING RECORDED' : 'POST-SERVICE FEEDBACK'}
+                        </span>
+                      </div>
+
+                      {complaint.citizenRating ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center text-[#FFC400]">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <Star
+                                  key={star}
+                                  className={`w-4 h-4 ${
+                                    star <= (complaint.citizenRating ?? 0)
+                                      ? 'fill-[#FFC400] text-[#FFC400]'
+                                      : 'text-white/20'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span className="text-xs font-bold text-white font-mono">
+                              {complaint.citizenRating} / 5
+                            </span>
+                            <span className="text-[10px] text-white/40 font-mono ml-auto">
+                              {complaint.ratedAt ? formatDate(complaint.ratedAt) : 'Submitted'}
+                            </span>
+                          </div>
+                          {complaint.citizenFeedback && (
+                            <p className="text-xs text-white/70 italic bg-white/5 border border-white/5 rounded-lg p-2.5 font-sans">
+                              "{complaint.citizenFeedback}"
+                            </p>
+                          )}
+                          <p className="text-[11px] text-[#22C55E] font-medium font-sans flex items-center gap-1">
+                            <span>✓</span> Your rating has been recorded and submitted to municipal analytics.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <p className="text-xs text-white/70 font-sans">
+                            How satisfied are you with the resolution of this civic issue?
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onClick={() => setSelectedRating(star)}
+                                onMouseEnter={() => setHoverRating(star)}
+                                onMouseLeave={() => setHoverRating(0)}
+                                className="p-1 rounded-lg hover:bg-white/5 transition-transform hover:scale-110 focus:outline-none"
+                                title={`${star} Star${star > 1 ? 's' : ''}`}
+                              >
+                                <Star
+                                  className={`w-6 h-6 transition-colors ${
+                                    star <= (hoverRating || selectedRating)
+                                      ? 'fill-[#FFC400] text-[#FFC400]'
+                                      : 'text-white/20 hover:text-white/40'
+                                  }`}
+                                />
+                              </button>
+                            ))}
+                            {selectedRating > 0 && (
+                              <span className="text-xs font-bold text-[#FFC400] font-mono ml-2">
+                                {selectedRating}/5 Star{selectedRating > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+
+                          {selectedRating > 0 && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              className="space-y-2.5 pt-1"
+                            >
+                              <input
+                                type="text"
+                                value={feedbackText}
+                                onChange={(e) => setFeedbackText(e.target.value)}
+                                placeholder="Share feedback on resolution quality (optional)..."
+                                maxLength={300}
+                                className="input-field text-xs py-2 w-full font-sans bg-black/40"
+                              />
+                              <motion.button
+                                {...buttonGestures}
+                                type="button"
+                                onClick={handleSubmitRating}
+                                disabled={submittingRating}
+                                className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 font-mono"
+                              >
+                                {submittingRating ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Send className="w-3.5 h-3.5" />
+                                )}
+                                <span>Submit Rating</span>
+                              </motion.button>
+                            </motion.div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </motion.div>

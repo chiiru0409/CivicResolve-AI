@@ -64,7 +64,7 @@ CATEGORY_SUBCATEGORIES: dict[str, list[str]] = {
 # Authoritative category → department mapping (mirrors classifier.py)
 CATEGORY_TO_DEPT: dict[str, tuple[str, str]] = {
     "Roads":          ("dept-roads",      "Municipal Roads & Infrastructure Department"),
-    "Infrastructure": ("dept-roads",      "Municipal Roads & Infrastructure Department"),
+    "Infrastructure": ("dept-infra",      "Public Works & Infrastructure Department"),
     "Garbage":        ("dept-sanitation", "Sanitation & Waste Management Department"),
     "Drainage":       ("dept-drainage",   "Drainage & Stormwater Management"),
     "Water":          ("dept-water",      "Water Supply & Distribution Department"),

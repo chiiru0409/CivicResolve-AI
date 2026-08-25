@@ -5,31 +5,53 @@ import { api, isBackendAvailable } from './api';
 
 // ── Category keyword map ───────────────────────────────────────────────────────
 const categoryKeywords: Record<Category, string[]> = {
-  Roads:          ['pothole', 'road', 'highway', 'street', 'tarmac', 'pavement', 'lane', 'traffic', 'marking', 'footpath', 'asphalt', 'divider', 'speed breaker', 'bump', 'carriageway'],
-  Garbage:        ['garbage', 'trash', 'waste', 'litter', 'rubbish', 'dump', 'bin', 'stench', 'smell', 'filth', 'sanitation', 'overflowing', 'debris', 'dumping', 'refuse'],
-  Drainage:       ['drain', 'drainage', 'flood', 'water logging', 'waterlogging', 'sewage', 'sewer', 'blockage', 'clog', 'overflow', 'stagnant', 'inundated', 'canal', 'nala'],
-  Water:          ['water supply', 'pipeline', 'pipe', 'supply', 'tap', 'leak', 'burst', 'contaminated', 'murky', 'dirty water', 'no water', 'water shortage', 'water cut', 'tanker'],
-  Streetlights:   ['light', 'streetlight', 'lamp', 'dark', 'bulb', 'electricity', 'illumination', 'flickering', 'lamppost', 'street lamp', 'no light'],
-  Infrastructure: ['bridge', 'sidewalk', 'bench', 'park', 'building', 'wall', 'structure', 'crack', 'collapse', 'broken', 'damaged', 'facility', 'public property', 'fence'],
+  Roads:          ['pothole', 'road', 'highway', 'street', 'tarmac', 'pavement', 'lane', 'traffic', 'marking', 'footpath', 'asphalt', 'divider', 'speed breaker', 'bump', 'carriageway', 'crater', 'sinkhole', 'bad road', 'broken road', 'hole on road', 'road damage'],
+  Garbage:        ['garbage', 'trash', 'waste', 'litter', 'rubbish', 'dump', 'bin', 'stench', 'smell', 'filth', 'sanitation', 'overflowing', 'debris', 'dumping', 'refuse', 'kachra', 'dustbin', 'dumpster', 'uncollected', 'garbage full'],
+  Drainage:       ['drain', 'drainage', 'flood', 'water logging', 'waterlogging', 'sewage', 'sewer', 'blockage', 'clog', 'clogged', 'blocked', 'overflow', 'stagnant', 'inundated', 'canal', 'nala', 'gutter', 'open drain'],
+  Water:          ['water supply', 'pipeline', 'pipe', 'supply', 'tap', 'leak', 'leaking', 'leakage', 'burst', 'contaminated', 'murky', 'dirty water', 'no water', 'water shortage', 'water cut', 'tanker', 'drinking water', 'gushing', 'water leakage'],
+  Streetlights:   ['light', 'streetlight', 'lamp', 'dark', 'bulb', 'electricity', 'illumination', 'flickering', 'lamppost', 'street lamp', 'no light', 'wire', 'cable', 'live wire', 'exposed cable', 'exposed wire', 'electric pole', 'electrical', 'sparking', 'electrical hazard'],
+  Infrastructure: ['bridge', 'sidewalk', 'bench', 'park', 'building', 'wall', 'structure', 'crack', 'collapse', 'broken', 'damaged', 'facility', 'public property', 'fence', 'footbridge', 'bus shelter', 'public toilet'],
   Other:          [],
 };
 
+const criticalPriorityKeywords = [
+  'critical', 'life threatening', 'electrocution', 'live wire', 'exposed cable',
+  'exposed wire', 'building collapse', 'collapsed bridge', 'gas leak',
+  'explosion', 'severe fire', 'massive sinkhole', 'electric shock', 'sparking wire',
+];
+
 const highPriorityKeywords = [
   'accident', 'dangerous', 'emergency', 'urgent', 'collapsed', 'burst', 'gushing', 'flooding',
-  'injured', 'severe', 'critical', 'major', 'serious', 'unsafe', 'blocked road', 'no supply',
-  'fire', 'electrocution', 'fallen tree', 'structural failure',
+  'injured', 'severe', 'major', 'serious', 'unsafe', 'blocked road', 'no supply',
+  'fire', 'fallen tree', 'structural failure', 'deep crater', 'open drain',
 ];
 const mediumPriorityKeywords = [
   'overflowing', 'accumulating', 'days', 'week', 'multiple', 'continuous',
   'ongoing', 'residents', 'colony', 'repeated', 'several', 'persistent',
+  'months', 'long time', 'still not fixed', 'traffic jam', 'flickering', 'leakage',
 ];
 
 function detectCategory(text: string): Category {
   const lower = text.toLowerCase();
+  if (lower.includes('drain') && (lower.includes('blocked') || lower.includes('overflow') || lower.includes('rain') || lower.includes('water'))) {
+    return 'Drainage';
+  }
+  if ((lower.includes('leak') || lower.includes('pipeline') || lower.includes('pipe')) && lower.includes('water')) {
+    return 'Water';
+  }
+  if ((lower.includes('wire') || lower.includes('cable') || lower.includes('electric')) && (lower.includes('exposed') || lower.includes('live') || lower.includes('hanging') || lower.includes('pole'))) {
+    return 'Streetlights';
+  }
+
   let best: Category = 'Other';
   let bestScore = 0;
   for (const [cat, kws] of Object.entries(categoryKeywords)) {
-    const score = kws.filter((kw) => lower.includes(kw)).length;
+    let score = 0;
+    for (const kw of kws) {
+      if (lower.includes(kw)) {
+        score += kw.split(' ').length * 2;
+      }
+    }
     if (score > bestScore) { bestScore = score; best = cat as Category; }
   }
   return best;
@@ -37,6 +59,8 @@ function detectCategory(text: string): Category {
 
 function detectPriority(text: string): 'HIGH' | 'MEDIUM' | 'LOW' {
   const lower = text.toLowerCase();
+  if (criticalPriorityKeywords.some((kw) => lower.includes(kw))) return 'HIGH';
+  if ((lower.includes('school') || lower.includes('hospital')) && (lower.includes('wire') || lower.includes('cable') || lower.includes('electric'))) return 'HIGH';
   if (highPriorityKeywords.some((kw) => lower.includes(kw))) return 'HIGH';
   const med = mediumPriorityKeywords.filter((kw) => lower.includes(kw)).length;
   if (med >= 1) return 'MEDIUM';

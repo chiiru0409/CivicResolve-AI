@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, Zap, Loader2, CheckCircle, Edit2,
   Camera, Shield, AlertTriangle, Sparkles, CheckCircle2, AlertOctagon, Clock,
-  FileCheck, User, Mail, Phone, RefreshCw, Layers
+  FileCheck, User, Mail, Phone, RefreshCw, Layers, Star
 } from 'lucide-react';
 import PriorityBadge from '../../components/PriorityBadge';
 import StatusBadge from '../../components/StatusBadge';
@@ -594,6 +594,63 @@ export default function AdminComplaintDetailPage() {
               Save Assignment
             </button>
           </div>
+
+          {/* Citizen Post-Resolution Rating Card (Admin View) */}
+          {['Resolved', 'Closed'].includes(complaint.status) && (
+            <div className="card space-y-3">
+              <div className="flex items-center justify-between border-b border-white/8 pb-3">
+                <h2 className="font-black text-white flex items-center gap-2 font-display text-base">
+                  <Star className="w-4 h-4 text-[#FFC400] fill-[#FFC400]" /> Citizen Resolution Rating
+                </h2>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                  complaint.citizenRating
+                    ? 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20'
+                    : 'bg-white/5 text-white/40 border-white/10'
+                }`}>
+                  {complaint.citizenRating ? 'RATED' : 'PENDING CITIZEN RATING'}
+                </span>
+              </div>
+
+              {complaint.citizenRating ? (
+                <div className="space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center text-[#FFC400]">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className={`w-4 h-4 ${
+                            star <= (complaint.citizenRating ?? 0)
+                              ? 'fill-[#FFC400] text-[#FFC400]'
+                              : 'text-white/20'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <span className="text-sm font-bold text-white font-mono">
+                      {complaint.citizenRating} / 5.0
+                    </span>
+                    <span className="text-xs text-white/40 font-mono ml-auto">
+                      {complaint.ratedAt ? formatDateTime(complaint.ratedAt) : 'Submitted'}
+                    </span>
+                  </div>
+                  {complaint.citizenFeedback ? (
+                    <div className="bg-white/5 border border-white/8 rounded-xl p-3">
+                      <p className="text-[10px] font-mono text-white/40 mb-1 uppercase tracking-wider">Citizen Feedback:</p>
+                      <p className="text-sm text-white/80 italic font-sans">"{complaint.citizenFeedback}"</p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-white/40 font-mono italic">No written feedback provided.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 bg-white/3 border border-white/6 rounded-xl text-center">
+                  <p className="text-xs text-white/50 font-sans">
+                    Citizen has not submitted a resolution rating for this case yet.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Status Lifecycle Actions */}
           <div className="card space-y-3">

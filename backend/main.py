@@ -64,6 +64,7 @@ from schemas import (
     ComplaintAIAnalysisResponse, ActionProposal, DuplicateCluster, ExecuteActionRequest,
     ImageAnalysisRequest, ImageAnalysisResponse,
     DuplicateCheckRequest, DuplicateCheckResult, MapIncident,
+    ComplaintRatingRequest, ComplaintRatingResponse,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -830,8 +831,79 @@ def track_complaint(complaint_number: str):
             "created_at":        d["created_at"],
             "updated_at":        d["updated_at"],
             "resolved_at":       d.get("resolved_at"),
+            "citizen_rating":    d.get("citizen_rating"),
+            "citizen_feedback":  d.get("citizen_feedback"),
+            "rated_at":          d.get("rated_at"),
             "updates":           updates,
         }
+    finally:
+        conn.close()
+
+
+@router.post("/complaints/{complaint_id}/rate", response_model=ComplaintRatingResponse)
+@router.post("/track/{complaint_id}/rate", response_model=ComplaintRatingResponse)
+def rate_complaint(complaint_id: str, body: ComplaintRatingRequest):
+    """
+    Allow citizens to submit a 1-5 star rating and optional feedback once a complaint is Resolved/Closed.
+    Prevents duplicate rating submissions.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM complaints WHERE id = ? OR complaint_number = ?;",
+            (complaint_id, complaint_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Complaint '{complaint_id}' not found.")
+
+        d = dict(row)
+        real_id = d["id"]
+        comp_num = d["complaint_number"]
+        status_clean = str(d.get("status") or "").strip().lower()
+
+        # Rule 1: Rating is available ONLY after the case is Resolved/Closed.
+        if status_clean not in ("resolved", "closed"):
+            raise HTTPException(
+                status_code=400,
+                detail="Ratings can only be submitted after a case has been marked Resolved or Closed.",
+            )
+
+        # Rule 2 & 3: Prevent accidental duplicate submissions.
+        if d.get("citizen_rating") is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This complaint has already been rated with {d.get('citizen_rating')} stars.",
+            )
+
+        now = _now_iso()
+        with conn:
+            conn.execute(
+                """
+                UPDATE complaints SET
+                    citizen_rating = ?,
+                    citizen_feedback = ?,
+                    rated_at = ?,
+                    updated_at = ?
+                WHERE id = ?;
+                """,
+                (body.rating, body.feedback.strip() if body.feedback else None, now, now, real_id),
+            )
+            stars_str = "★" * body.rating + "☆" * (5 - body.rating)
+            fb_text = f': "{body.feedback.strip()}"' if body.feedback and body.feedback.strip() else ""
+            msg = f"Citizen submitted {body.rating}-star rating ({stars_str}){fb_text}"
+            conn.execute(
+                "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Rated', ?, 'citizen');",
+                (real_id, msg),
+            )
+
+        return ComplaintRatingResponse(
+            complaint_id=real_id,
+            complaint_number=comp_num,
+            rating=body.rating,
+            feedback=body.feedback.strip() if body.feedback else None,
+            rated_at=now,
+            message="Thank you! Your resolution rating has been recorded.",
+        )
     finally:
         conn.close()
 
@@ -1010,6 +1082,45 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
         pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved','closed','archived');").fetchone()[0]
         resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved','closed');").fetchone()[0]
 
+        total_ratings = conn.execute("SELECT COUNT(*) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
+        avg_rating_val = conn.execute("SELECT AVG(citizen_rating) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
+        avg_rating = round(float(avg_rating_val), 1) if avg_rating_val is not None else 0.0
+
+        # Star breakdown (5..1)
+        rating_dist_rows = conn.execute(
+            "SELECT citizen_rating, COUNT(*) as cnt FROM complaints WHERE citizen_rating IS NOT NULL GROUP BY citizen_rating;"
+        ).fetchall()
+        rating_map = {int(r[0]): int(r[1]) for r in rating_dist_rows if r[0] is not None}
+        rating_breakdown = [
+            {"stars": s, "count": rating_map.get(s, 0)}
+            for s in [5, 4, 3, 2, 1]
+        ]
+
+        # Ratings history
+        recent_ratings_rows = conn.execute(
+            """
+            SELECT id, complaint_number, title, category, department, citizen_rating, citizen_feedback, rated_at, status
+            FROM complaints
+            WHERE citizen_rating IS NOT NULL
+            ORDER BY rated_at DESC, updated_at DESC
+            LIMIT 50;
+            """
+        ).fetchall()
+        ratings_history = [
+            {
+                "id": r["id"],
+                "complaint_number": r["complaint_number"],
+                "title": r["title"],
+                "category": r["category"],
+                "department": r["department"],
+                "rating": r["citizen_rating"],
+                "feedback": r["citizen_feedback"],
+                "rated_at": r["rated_at"],
+                "status": r["status"],
+            }
+            for r in recent_ratings_rows
+        ]
+
         by_cat = conn.execute(
             "SELECT category, COUNT(*) as count FROM complaints GROUP BY category ORDER BY count DESC;"
         ).fetchall()
@@ -1029,6 +1140,10 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
             "pending": pending,
             "resolved": resolved,
             "resolution_rate": round((resolved / total * 100), 1) if total > 0 else 0,
+            "total_ratings": total_ratings,
+            "average_rating": avg_rating,
+            "rating_breakdown": rating_breakdown,
+            "ratings_history": ratings_history,
             "by_category":   [{"category":   r[0], "count": r[1]} for r in by_cat],
             "by_priority":   [{"priority":   r[0], "count": r[1]} for r in by_pri],
             "by_status":     [{"status":     r[0], "count": r[1]} for r in by_sta],
@@ -1053,6 +1168,10 @@ def admin_overview(current_user: dict = Depends(require_admin)):
         critical = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) = 'CRITICAL';").fetchone()[0]
         active_incidents = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND latitude IS NOT NULL AND longitude IS NOT NULL AND (latitude != 0 OR longitude != 0);").fetchone()[0]
 
+        total_ratings = conn.execute("SELECT COUNT(*) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
+        avg_rating_val = conn.execute("SELECT AVG(citizen_rating) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
+        avg_rating = round(float(avg_rating_val), 1) if avg_rating_val is not None else 0.0
+
         log_db_operation("admin_overview", total)
         return {
             "total_complaints": total,
@@ -1066,6 +1185,8 @@ def admin_overview(current_user: dict = Depends(require_admin)):
             "high_priority": high_prio,
             "critical": critical,
             "active_incidents": active_incidents,
+            "total_ratings": total_ratings,
+            "average_rating": avg_rating,
         }
     finally:
         conn.close()

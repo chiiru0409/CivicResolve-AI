@@ -174,7 +174,10 @@ CREATE TABLE IF NOT EXISTS complaints (
     source              TEXT DEFAULT 'Web',
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved_at         TEXT
+    resolved_at         TEXT,
+    citizen_rating      INTEGER,
+    citizen_feedback    TEXT,
+    rated_at            TEXT
 );
 """
 
@@ -259,6 +262,9 @@ _MIGRATION_COLUMNS = [
     ("complaints", "inspection_required","INTEGER DEFAULT 0"),
     ("complaints", "location_risk",      "TEXT"),
     ("complaints", "action_plan",        "TEXT"),
+    ("complaints", "citizen_rating",     "INTEGER"),
+    ("complaints", "citizen_feedback",   "TEXT"),
+    ("complaints", "rated_at",           "TEXT"),
     ("complaint_updates", "updated_by",  "TEXT DEFAULT 'system'"),
     ("assignments", "officer",           "TEXT"),
     ("assignments", "team",              "TEXT"),

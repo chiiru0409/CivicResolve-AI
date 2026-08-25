@@ -130,6 +130,20 @@ class ComplaintCreate(BaseModel):
             raise ValueError(f"priority must be one of {VALID_PRIORITIES}")
         return v
 
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v):
+        if v is not None and not (-90.0 <= v <= 90.0):
+            raise ValueError("Latitude must be between -90 and 90 degrees.")
+        return v
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v):
+        if v is not None and not (-180.0 <= v <= 180.0):
+            raise ValueError("Longitude must be between -180 and 180 degrees.")
+        return v
+
 
 class StatusUpdate(BaseModel):
     """PATCH /admin/complaints/{id}/status"""
@@ -221,6 +235,9 @@ class ComplaintOut(BaseModel):
     created_at: str
     updated_at: str
     resolved_at: Optional[str]
+    citizen_rating: Optional[int] = None
+    citizen_feedback: Optional[str] = None
+    rated_at: Optional[str] = None
     updates: list[ComplaintUpdateOut] = []
     assignments: list[AssignmentOut] = []
 
@@ -241,6 +258,7 @@ class ComplaintListItem(BaseModel):
     landmark: Optional[str] = None
     ai_confidence: Optional[int] = None
     source: Optional[str] = "Web"
+    citizen_rating: Optional[int] = None
     created_at: str
     updated_at: str
 
@@ -388,9 +406,27 @@ class ComplaintAIAnalysisResponse(BaseModel):
 class ExecuteActionRequest(BaseModel):
     action_type: str = Field(..., description="'assign_department', 'update_status', 'escalate'")
     complaint_id: str
-    target_value: str
+    target_value: Optional[str] = None
     officer_or_team: Optional[str] = None
     note: Optional[str] = None
+
+
+# ══════════════════════════════════════════════════════════════
+# CITIZEN POST-RESOLUTION RATING SCHEMAS
+# ══════════════════════════════════════════════════════════════
+
+class ComplaintRatingRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5, description="Citizen rating from 1 to 5 stars")
+    feedback: Optional[str] = Field(None, max_length=1000, description="Optional feedback or comment")
+
+
+class ComplaintRatingResponse(BaseModel):
+    complaint_id: str
+    complaint_number: str
+    rating: int
+    feedback: Optional[str] = None
+    rated_at: str
+    message: str
 
 
 # ══════════════════════════════════════════════════════════════

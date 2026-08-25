@@ -103,6 +103,16 @@ export interface Complaint {
   resolutionNotes?: string;
   resolvedAt?: string;
   resolutionProofUrl?: string;
+  citizenRating?: number;
+  citizenFeedback?: string;
+  ratedAt?: string;
+}
+
+export interface ComplaintRating {
+  caseId: string;
+  rating: number;
+  feedback?: string;
+  timestamp: string;
 }
 
 // ---- AI Analysis ------------------------------------------------

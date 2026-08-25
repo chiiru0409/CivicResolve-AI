@@ -91,6 +91,9 @@ export function mapApiComplaint(raw: Record<string, any>): Complaint {
     resolutionNotes:    (raw.resolution_notes as string) || undefined,
     resolvedAt:         (raw.resolved_at as string) || undefined,
     resolutionProofUrl: (raw.resolution_proof_url as string) || undefined,
+    citizenRating:      raw.citizen_rating != null ? Number(raw.citizen_rating) : undefined,
+    citizenFeedback:    (raw.citizen_feedback as string) || undefined,
+    ratedAt:            (raw.rated_at as string) || undefined,
   };
 }
 
@@ -107,6 +110,38 @@ export async function submitComplaint(
     // ignore
   }
   return mapApiComplaint(raw);
+}
+
+/** Submit citizen post-resolution rating (1-5 stars) and optional feedback. */
+export async function rateComplaint(
+  idOrNumber: string,
+  rating: number,
+  feedback?: string,
+): Promise<{
+  complaint_id: string;
+  complaint_number: string;
+  rating: number;
+  feedback?: string;
+  rated_at: string;
+  message: string;
+}> {
+  const result = await api.post<{
+    complaint_id: string;
+    complaint_number: string;
+    rating: number;
+    feedback?: string;
+    rated_at: string;
+    message: string;
+  }>(`/complaints/${encodeURIComponent(idOrNumber)}/rate`, {
+    rating,
+    feedback: feedback?.trim() || null,
+  });
+  try {
+    window.dispatchEvent(new CustomEvent('complaints:updated'));
+  } catch {
+    // ignore
+  }
+  return result;
 }
 
 /** Get all complaints for the logged-in citizen strictly from backend database. */

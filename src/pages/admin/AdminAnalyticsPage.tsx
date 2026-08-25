@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { TrendingUp, Brain, BarChart2, Zap, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
+import { TrendingUp, Brain, BarChart2, Zap, AlertTriangle, RefreshCw, Loader2, Star, MessageSquare, CheckCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { api } from '../../services/api';
 import SkeletonCard from '../../components/SkeletonCard';
@@ -7,6 +7,7 @@ import PageTransition from '../../components/PageTransition';
 import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
 import AnimatedNumber from '../../components/AnimatedNumber';
 import { cardGestures, buttonGestures } from '../../utils/motion';
+import { formatDateTime } from '../../utils/helpers';
 
 const BAR_COLORS: Record<string, string> = {
   Roads: '#E10600', Garbage: '#FFC400', Drainage: '#3B82F6',
@@ -34,11 +35,23 @@ const Bar: React.FC<{ data: { label: string; value: number }[]; maxVal?: number 
         </div>
       ))}
       {data.length === 0 && (
-        <p className="text-xs text-white/30 italic py-2 font-mono">No category records in database yet.</p>
+        <p className="text-xs text-white/30 italic py-2 font-mono">No records in database yet.</p>
       )}
     </div>
   );
 };
+
+interface RatedCaseItem {
+  id: string;
+  complaint_number: string;
+  title: string;
+  category: string;
+  department?: string;
+  rating: number;
+  feedback?: string;
+  rated_at: string;
+  status: string;
+}
 
 interface AnalyticsData {
   totalComplaints: number;
@@ -47,6 +60,10 @@ interface AnalyticsData {
   resolved: number;
   resolutionRate: number;
   avgResolutionDays: number;
+  totalRatings: number;
+  averageRating: number;
+  ratingBreakdown: Array<{ stars: number; count: number }>;
+  ratingsHistory: RatedCaseItem[];
   byCategory: Array<{ category: string; count: number }>;
   byPriority: Array<{ priority: string; count: number }>;
 }
@@ -67,6 +84,22 @@ export default function AdminAnalyticsPage() {
       const byPri = Array.isArray(data.by_priority)
         ? data.by_priority.map((x: any) => ({ priority: String(x.priority || 'MEDIUM'), count: Number(x.count || 0) }))
         : [];
+      const ratingBreakdown = Array.isArray(data.rating_breakdown)
+        ? data.rating_breakdown.map((x: any) => ({ stars: Number(x.stars || 5), count: Number(x.count || 0) }))
+        : [];
+      const ratingsHistory = Array.isArray(data.ratings_history)
+        ? data.ratings_history.map((x: any) => ({
+            id: String(x.id || ''),
+            complaint_number: String(x.complaint_number || x.id || ''),
+            title: String(x.title || ''),
+            category: String(x.category || 'Other'),
+            department: x.department ? String(x.department) : undefined,
+            rating: Number(x.rating || 5),
+            feedback: x.feedback ? String(x.feedback) : undefined,
+            rated_at: String(x.rated_at || ''),
+            status: String(x.status || 'Resolved'),
+          }))
+        : [];
 
       setSummary({
         totalComplaints: Number(data.total_complaints ?? 0),
@@ -75,6 +108,10 @@ export default function AdminAnalyticsPage() {
         resolved:        Number(data.resolved ?? 0),
         resolutionRate:  Number(data.resolution_rate ?? 0),
         avgResolutionDays: Number(data.avg_resolution_days ?? 2.8),
+        totalRatings:    Number(data.total_ratings ?? 0),
+        averageRating:   Number(data.average_rating ?? 0.0),
+        ratingBreakdown,
+        ratingsHistory,
         byCategory: byCat,
         byPriority: byPri,
       });
@@ -190,6 +227,122 @@ export default function AdminAnalyticsPage() {
               </div>
               <Bar data={priData} />
             </motion.div>
+          </div>
+
+          {/* Citizen Resolution Ratings & Feedback */}
+          <div className="relative bg-[#111] border border-white/8 rounded-2xl p-6 overflow-hidden shadow-xl space-y-6">
+            <div className="h-0.5 w-full bg-gradient-to-r from-transparent via-[#FFC400]/40 to-transparent mb-2" />
+            
+            <div className="flex items-center justify-between flex-wrap gap-4 border-b border-white/8 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-[#FFC400]/10 border border-[#FFC400]/20 text-[#FFC400]">
+                  <Star className="w-5 h-5 fill-[#FFC400]" />
+                </div>
+                <div>
+                  <h2 className="font-black text-white font-display text-lg">Citizen Resolution Ratings</h2>
+                  <p className="text-xs text-white/40 font-sans">Direct feedback & satisfaction scores from resolved municipal cases</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-[10px] uppercase font-mono text-white/40">Total Ratings</p>
+                  <p className="text-xl font-black text-white font-mono">{summary.totalRatings}</p>
+                </div>
+                <div className="h-8 w-px bg-white/10" />
+                <div className="text-right">
+                  <p className="text-[10px] uppercase font-mono text-white/40">Average Rating</p>
+                  <p className="text-xl font-black text-[#FFC400] font-mono">
+                    {summary.averageRating > 0 ? `${summary.averageRating.toFixed(1)} / 5.0` : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Ratings Breakdown and History Grid */}
+            <div className="grid lg:grid-cols-12 gap-6">
+              
+              {/* Star distribution */}
+              <div className="lg:col-span-4 bg-white/5 border border-white/8 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-2">Rating Distribution</p>
+                <div className="space-y-2">
+                  {[5, 4, 3, 2, 1].map((star) => {
+                    const found = summary.ratingBreakdown.find((b) => b.stars === star);
+                    const count = found ? found.count : 0;
+                    const pct = summary.totalRatings > 0 ? (count / summary.totalRatings) * 100 : 0;
+                    return (
+                      <div key={star} className="flex items-center gap-2 text-xs font-mono">
+                        <span className="w-12 text-white/60 flex items-center gap-1">
+                          {star} <Star className="w-3 h-3 fill-[#FFC400] text-[#FFC400]" />
+                        </span>
+                        <div className="flex-1 bg-white/5 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-[#FFC400] h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="w-8 text-right text-white/40">{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Recent Rated Cases List */}
+              <div className="lg:col-span-8 space-y-3">
+                <p className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-2">
+                  Recent Case Ratings ({summary.ratingsHistory.length})
+                </p>
+                {summary.ratingsHistory.length === 0 ? (
+                  <div className="bg-white/3 border border-white/8 rounded-xl p-6 text-center text-white/40 text-xs font-mono">
+                    No citizen ratings submitted yet. Ratings will appear here when citizens rate resolved complaints.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                    {summary.ratingsHistory.map((item) => (
+                      <div
+                        key={item.id}
+                        className="bg-white/5 hover:bg-white/8 border border-white/8 rounded-xl p-3.5 transition-colors space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold font-mono text-[#E10600]">
+                              Case #{item.complaint_number}
+                            </span>
+                            <span className="text-[11px] text-white/40 font-sans truncate max-w-[200px]">
+                              {item.title}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="flex items-center text-[#FFC400]">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star
+                                  key={s}
+                                  className={`w-3 h-3 ${
+                                    s <= item.rating ? 'fill-[#FFC400] text-[#FFC400]' : 'text-white/20'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span className="text-xs font-mono font-bold text-white">
+                              {item.rating}/5
+                            </span>
+                          </div>
+                        </div>
+                        {item.feedback && (
+                          <p className="text-xs text-white/70 italic bg-black/30 border border-white/5 rounded-lg px-2.5 py-1.5 font-sans">
+                            Feedback: "{item.feedback}"
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between text-[10px] text-white/30 font-mono">
+                          <span>{item.department || item.category}</span>
+                          <span>{item.rated_at ? formatDateTime(item.rated_at) : ''}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* AI recurring problems */}
