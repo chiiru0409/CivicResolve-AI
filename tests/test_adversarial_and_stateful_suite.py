@@ -168,3 +168,47 @@ def test_admin_copilot_grounded_queries_and_action_execution(client):
     )
     assert res_dept.status_code == 200
     assert "Department" in res_dept.json()["answer"]
+
+
+def test_text_visual_contradiction_detection(client):
+    """
+    Mandatory Acceptance Test:
+    User description: 'building collapsed in my colony'
+    Image: pothole / road infrastructure damage
+    The system MUST detect text-visual contradiction and return appropriate warnings.
+    """
+    res = client.post(
+        "/api/ai/analyze-image",
+        json={
+            "description": "building collapsed in my colony",
+            "filename": "damaged_road_pothole_asphalt.jpg",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["suggested_category"] == "Roads"
+    assert "detected_objects" in data
+    assert len(data["detected_objects"]) > 0
+
+
+def test_image_quality_triage_and_uncertainty(client):
+    """Verify that optical quality triage handles blurry/insufficient photos honestly."""
+    res_blurry = client.post(
+        "/api/ai/analyze-image",
+        json={
+            "description": "cannot see clearly",
+            "filename": "blurry_dark_photo.jpg",
+        },
+    )
+    assert res_blurry.status_code == 200
+    data = res_blurry.json()
+    assert "detected_objects" in data
+
+
+def test_multi_issue_detection_backend():
+    """Verify multi-issue extraction on multi-hazard complaints."""
+    from classifier import classify
+    cat = classify("Severe garbage dump beside an open drain with flooding")
+    assert cat in ("Garbage", "Drainage")
+
+

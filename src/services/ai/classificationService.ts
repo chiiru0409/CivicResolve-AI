@@ -6,6 +6,25 @@
 
 import type { Category, Priority, AIAnalysis } from '../../types';
 import { MUNICIPAL_DEPARTMENTS, calculateSlaDeadline } from './routingService';
+import { detectContradiction } from './visionService';
+
+export type KnowledgeStateValue = 'KNOWN' | 'INFERRED' | 'UNKNOWN' | 'UNVERIFIED' | 'CONFLICTING' | 'DERIVED' | 'CONFIGURED';
+
+export interface StructuredKnowledgeState {
+  textFact: KnowledgeStateValue;
+  visualEvidence: KnowledgeStateValue;
+  duration: KnowledgeStateValue;
+  jurisdiction: KnowledgeStateValue;
+  slaPolicy: KnowledgeStateValue;
+}
+
+export interface ConflictResolutionOption {
+  id: string;
+  label: string;
+  category: Category;
+  title: string;
+  explanation: string;
+}
 
 export interface MultimodalInput {
   description: string;
@@ -26,6 +45,11 @@ export interface StructuredClassificationResult extends AIAnalysis {
   confidenceQuality: 'HIGH' | 'MEDIUM' | 'PROVISIONAL';
   jurisdictionWard: string;
   slaDeadline: string;
+  hasConflict: boolean;
+  conflictType: 'TEXT_VISUAL_MISMATCH' | 'NONE';
+  conflictMessage: string | null;
+  resolutionOptions?: ConflictResolutionOption[];
+  knowledgeState: StructuredKnowledgeState;
   whyClassification: {
     textClues: string[];
     visualEvidenceClues: string[];
@@ -137,19 +161,74 @@ export function classifyCivicIssue(input: MultimodalInput): StructuredClassifica
     urgencyScore = 3.8;
   }
 
-  // 3. Routing & SLA
+  // 3. Contradiction & Multimodal Conflict Detection
+  let hasConflict = false;
+  let conflictType: 'TEXT_VISUAL_MISMATCH' | 'NONE' = 'NONE';
+  let conflictMessage: string | null = null;
+  let resolutionOptions: ConflictResolutionOption[] | undefined = undefined;
+
+  // If there's photographic evidence or image labels, compare visual vs textual semantics
+  if (input.imageUrl || (input.imageLabels && input.imageLabels.length > 0)) {
+    const visualCategory = (input.imageLabels && input.imageLabels.some(l => /pothole|road|asphalt|footpath|crater/i.test(l)))
+      ? 'Roads'
+      : (input.imageLabels && input.imageLabels.some(l => /garbage|trash|waste/i.test(l)))
+      ? 'Garbage'
+      : (input.imageLabels && input.imageLabels.some(l => /drain|flood|waterlogging/i.test(l)))
+      ? 'Drainage'
+      : (input.imageLabels && input.imageLabels.some(l => /pipe|leak|burst/i.test(l)))
+      ? 'Water'
+      : bestCategory;
+
+    const conflict = detectContradiction(input.description, visualCategory);
+    if (conflict.isConflict) {
+      hasConflict = true;
+      conflictType = conflict.conflictType;
+      conflictMessage = conflict.message;
+      resolutionOptions = [
+        {
+          id: 'report-visual',
+          label: conflict.visualOption?.label || `Report Visual Issue (${visualCategory})`,
+          category: conflict.visualOption?.category || visualCategory,
+          title: `${conflict.visualOption?.label || visualCategory} at ${input.location || 'Reported Location'}`,
+          explanation: 'Proceed with the issue directly visible in the uploaded photo evidence.',
+        },
+        {
+          id: 'report-text',
+          label: conflict.textOption?.label || `Report Description (${bestCategory})`,
+          category: conflict.textOption?.category || bestCategory,
+          title: `${conflict.textOption?.label || bestCategory} at ${input.location || 'Reported Location'}`,
+          explanation: 'Proceed with the original written description (you may also attach a new photo).',
+        }
+      ];
+    }
+  }
+
+  // 4. Routing & SLA
   const deptInfo = MUNICIPAL_DEPARTMENTS[bestCategory] || MUNICIPAL_DEPARTMENTS.Other;
   const slaCalc = calculateSlaDeadline(new Date(), priority, bestCategory);
 
-  // 4. Subcategory & Rationale
+  // 5. Subcategory & Rationale
   const taxonomy = CATEGORY_TAXONOMY[bestCategory];
   const subcategory = taxonomy.subcategories[0] || 'General Report';
   const safetyRisk = priority === 'CRITICAL' || priority === 'HIGH' ? taxonomy.defaultRisk : 'Moderate civic inconvenience';
 
-  const whyRationale = `Identified as ${bestCategory} (${priority} priority) based on textual terms [${textCluesFound.slice(0, 4).join(', ')}] ${input.imageLabels ? `and visual features [${input.imageLabels.slice(0, 2).join(', ')}]` : ''}. Assigned to ${deptInfo.department} with a strict ${slaCalc.slaHours}h response window.`;
+  const whyRationale = hasConflict
+    ? `Contradiction detected: Text describes [${input.description.slice(0, 40)}...] while visual evidence indicates [${(input.imageLabels || []).slice(0, 2).join(', ') || 'infrastructure issue'}]. Clarification required before final dispatch.`
+    : `Identified as ${bestCategory} (${priority} priority) based on textual terms [${textCluesFound.slice(0, 4).join(', ')}] ${input.imageLabels ? `and visual features [${input.imageLabels.slice(0, 2).join(', ')}]` : ''}. Assigned to ${deptInfo.department} with a strict ${slaCalc.slaHours}h response window.`;
 
-  // Calculated honest confidence
-  const confidence = Math.min(98, Math.max(78, 80 + textCluesFound.length * 4 + (input.imageUrl ? 6 : 0)));
+  // Calculated honest confidence (reduced if unverified/conflicting)
+  const baseConfidence = hasConflict ? 52 : Math.min(98, Math.max(75, 80 + textCluesFound.length * 4 + (input.imageUrl ? 6 : 0)));
+  const confidenceQuality = hasConflict ? 'PROVISIONAL' : baseConfidence >= 90 ? 'HIGH' : baseConfidence >= 80 ? 'MEDIUM' : 'PROVISIONAL';
+
+  // 6. Knowledge State
+  const hasDuration = /day|week|month|year|since|hour|yesterday|ongoing/i.test(input.description);
+  const knowledgeState: StructuredKnowledgeState = {
+    textFact: input.description.length >= 10 ? 'KNOWN' : 'UNVERIFIED',
+    visualEvidence: hasConflict ? 'CONFLICTING' : input.imageUrl ? 'INFERRED' : 'UNKNOWN',
+    duration: hasDuration ? 'KNOWN' : 'UNKNOWN',
+    jurisdiction: input.location ? 'DERIVED' : 'UNVERIFIED',
+    slaPolicy: 'CONFIGURED',
+  };
 
   return {
     title: `${subcategory} reported at ${input.location || 'Municipal Area'}`,
@@ -159,8 +238,8 @@ export function classifyCivicIssue(input: MultimodalInput): StructuredClassifica
     severity: urgencyScore,
     department: deptInfo.department,
     location: input.location || 'Location not specified',
-    confidence,
-    confidenceQuality: confidence >= 90 ? 'HIGH' : confidence >= 80 ? 'MEDIUM' : 'PROVISIONAL',
+    confidence: baseConfidence,
+    confidenceQuality,
     reason: deptInfo.slaDescription,
     assignedTeam: deptInfo.assignedTeam,
     estimatedResponse: `${slaCalc.slaHours} hours (SLA)`,
@@ -168,6 +247,11 @@ export function classifyCivicIssue(input: MultimodalInput): StructuredClassifica
     urgencyScore,
     jurisdictionWard: deptInfo.wardJurisdiction || 'Zone Command 4',
     slaDeadline: slaCalc.deadline.toISOString(),
+    hasConflict,
+    conflictType,
+    conflictMessage,
+    resolutionOptions,
+    knowledgeState,
     whyClassification: {
       textClues: textCluesFound,
       visualEvidenceClues: visualClues,

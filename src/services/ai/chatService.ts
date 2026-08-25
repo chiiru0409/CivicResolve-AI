@@ -144,10 +144,62 @@ export async function getIntelligentChatResponse(
     };
   }
 
+  // Check for multi-issue triggers (e.g. "garbage near bus stop and road has huge pothole")
+  const hasGarbage = /garbage|trash|waste|dump/i.test(lower);
+  const hasRoad = /pothole|road|asphalt|crater/i.test(lower);
+  const hasDrainage = /drain|sewer|flood|waterlog/i.test(lower);
+  const hasLight = /light|streetlight|wire|lamp/i.test(lower);
+  const detectedIssues: string[] = [];
+  if (hasGarbage) detectedIssues.push('Garbage & Solid Waste (Sanitation)');
+  if (hasRoad) detectedIssues.push('Road & Pothole Damage (Public Works)');
+  if (hasDrainage) detectedIssues.push('Drainage Overflow (Stormwater Operations)');
+  if (hasLight) detectedIssues.push('Streetlight / Electrical Hazard (Power Grid)');
+
+  if (detectedIssues.length > 1 && _slotState.turnCount <= 2) {
+    return {
+      message: `I identified **${detectedIssues.length} distinct civic issues** in your message:\n\n` +
+        detectedIssues.map((iss, idx) => `${idx + 1}. **${iss}**`).join('\n') +
+        `\n\nMunicipal protocols route each issue to specialized departments for faster dispatch. Would you like me to create separate tickets for both, or combine them into a prioritized multi-hazard report?`,
+      quickReplies: ['File Separate Tickets', 'Combine into 1 Report', 'Focus on Road Damage', 'Focus on Garbage'],
+      suggestComplaint: false,
+      slotState: { ..._slotState },
+    };
+  }
+
   // Check for slot correction / invalidation
   const correction = checkSlotCorrection(trimmed);
   if (correction.isCorrection && correction.field === 'location' && correction.newValue) {
     _slotState.location = correction.newValue;
+    const classified = classifyCivicIssue({
+      description: _slotState.issue || trimmed,
+      location: _slotState.location,
+    });
+    _slotState.category = classified.category;
+    _slotState.priority = classified.priority;
+    _slotState.authority = classified.department;
+
+    return {
+      message: `🔄 **Location Updated**: Changed location to **${_slotState.location}** (invalidating previous entry).\n\nHere is your updated municipal ticket draft:`,
+      suggestComplaint: true,
+      quickReplies: ['Confirm & Submit', 'Add more details', 'Cancel'],
+      analysisCard: {
+        category: classified.category,
+        priority: classified.priority,
+        department: classified.department,
+        confidence: classified.confidence,
+        urgencyScore: classified.urgencyScore,
+        safetyRisk: classified.safetyRisk,
+        slaDeadline: classified.slaDeadline,
+      },
+      complaintData: {
+        description: _slotState.issue || trimmed,
+        location: _slotState.location,
+        category: classified.category,
+        priority: classified.priority,
+        title: classified.title,
+      },
+      slotState: { ..._slotState },
+    };
   }
 
   // 1. Try real backend chat endpoint if online
@@ -261,8 +313,40 @@ export async function getIntelligentChatResponse(
   // Stage A: Collecting Location if user provided description first
   if (_slotState.confirmationState === 'clarifying' && !_slotState.location) {
     _slotState.location = trimmed;
-    _slotState.confirmationState = 'awaiting_confirmation';
 
+    // If citizen provides a landmark like "Near the government hospital", ask a natural refinement if helpful
+    if (/hospital|station|school|college|market|mall|temple|church|park/i.test(trimmed) && !trimmed.includes('entrance') && !trimmed.includes('main road')) {
+      _slotState.confirmationState = 'awaiting_confirmation';
+      const classified = classifyCivicIssue({
+        description: _slotState.issue || trimmed,
+        location: _slotState.location,
+      });
+
+      return {
+        message: `Got it (**${_slotState.location}**). Is it on the main road, near the main entrance, or in a specific wing? Either way, I've prepared your ticket draft below:`,
+        suggestComplaint: true,
+        quickReplies: ['On the main road', 'Near the entrance', 'Confirm & Submit'],
+        analysisCard: {
+          category: classified.category,
+          priority: classified.priority,
+          department: classified.department,
+          confidence: classified.confidence,
+          urgencyScore: classified.urgencyScore,
+          safetyRisk: classified.safetyRisk,
+          slaDeadline: classified.slaDeadline,
+        },
+        complaintData: {
+          description: _slotState.issue || trimmed,
+          location: _slotState.location,
+          category: classified.category,
+          priority: classified.priority,
+          title: classified.title,
+        },
+        slotState: { ..._slotState },
+      };
+    }
+
+    _slotState.confirmationState = 'awaiting_confirmation';
     const classified = classifyCivicIssue({
       description: _slotState.issue || trimmed,
       location: _slotState.location || 'Municipal Sector',
@@ -296,7 +380,17 @@ export async function getIntelligentChatResponse(
     };
   }
 
-  // Stage B: New Issue Intake
+  // Stage B: New Issue Intake — Vague Input Clarification (e.g. "There is a pothole")
+  if (/^(there is a pothole|pothole|huge pothole|road broken|garbage|drain overflowing|water leaking)\b/i.test(lower) && trimmed.length < 25) {
+    _slotState.issue = trimmed;
+    _slotState.confirmationState = 'clarifying';
+    return {
+      message: `Where is the issue located? A street, landmark, neighborhood, or nearby place is enough.`,
+      quickReplies: ['Near Government Hospital', 'Near Railway Station', 'Main Market Road', 'Outside my house'],
+      slotState: { ..._slotState },
+    };
+  }
+
   const classification = classifyCivicIssue({ description: trimmed });
   if (classification.category !== 'Other' || trimmed.length > 15) {
     _slotState.issue = trimmed;

@@ -9,6 +9,7 @@ import { analyzeComplaint } from '../services/aiService';
 import { submitComplaint, checkDuplicateComplaint } from '../services/complaintService';
 import PriorityBadge from '../components/PriorityBadge';
 import type { AIAnalysis } from '../types';
+import type { StructuredClassificationResult } from '../services/ai';
 import PageTransition from '../components/PageTransition';
 import { StaggerContainer, StaggerItem } from '../components/StaggerContainer';
 import { cardGestures, buttonGestures } from '../utils/motion';
@@ -18,7 +19,7 @@ interface Step { label: string; done: boolean; active: boolean }
 
 const INITIAL_STEPS: Step[] = [
   { label: 'Understanding complaint description', done: false, active: false },
-  { label: 'Analyzing image evidence',            done: false, active: false },
+  { label: 'Analyzing image evidence & consistency', done: false, active: false },
   { label: 'Identifying issue location & GPS',    done: false, active: false },
   { label: 'Cross-referencing duplicate complaints', done: false, active: false },
   { label: 'Classifying issue category & hazard', done: false, active: false },
@@ -37,9 +38,10 @@ const AIAnalysisPage: React.FC = () => {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<'processing' | 'result' | 'error'>('processing');
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS);
-  const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
+  const [analysis, setAnalysis] = useState<StructuredClassificationResult | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
   const [pendingData, setPendingData] = useState<Record<string, string> | null>(null);
+  const [conflictResolved, setConflictResolved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -72,6 +74,11 @@ const AIAnalysisPage: React.FC = () => {
       await new Promise((r) => setTimeout(r, 400));
       setSteps((prev) => prev.map((s) => ({ ...s, done: true, active: false })));
       setAnalysis(aiRes);
+      if (aiRes.hasConflict) {
+        setConflictResolved(false);
+      } else {
+        setConflictResolved(true);
+      }
       if (dupRes && dupRes.is_potential_duplicate) {
         setDuplicateInfo(dupRes);
       }
@@ -79,6 +86,20 @@ const AIAnalysisPage: React.FC = () => {
     } catch {
       setPhase('error');
     }
+  };
+
+  const handleResolveConflict = (category: string, title: string) => {
+    if (!analysis) return;
+    setAnalysis({
+      ...analysis,
+      category: category as any,
+      title,
+      hasConflict: false,
+      conflictType: 'NONE',
+      confidenceQuality: 'HIGH',
+      confidence: 88,
+    });
+    setConflictResolved(true);
   };
 
   const handleConfirm = async () => {
@@ -243,6 +264,61 @@ const AIAnalysisPage: React.FC = () => {
               <p className="text-white/50 mt-2 font-sans">Review the AI findings and confirm to submit</p>
             </div>
 
+            {/* ── Contradiction Alert Card ── */}
+            {analysis.hasConflict && !conflictResolved && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-[#E10600]/10 border-2 border-[#E10600]/50 rounded-2xl p-5 mb-4 shadow-[0_0_20px_rgba(225,6,0,0.2)]"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#E10600]/20 border border-[#E10600]/40 flex items-center justify-center text-[#E10600] flex-shrink-0 mt-0.5">
+                    <AlertCircle className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                      <p className="text-sm font-black text-[#E10600] font-display uppercase tracking-wider">
+                        Text-Visual Conflict Detected
+                      </p>
+                      <span className="telemetry-chip font-mono text-[10px] text-[#E10600] bg-[#E10600]/20 border border-[#E10600]/40">
+                        ACTION REQUIRED
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/90 leading-relaxed font-sans font-medium mb-3">
+                      {analysis.conflictMessage}
+                    </p>
+
+                    <p className="text-[11px] text-white/60 font-mono mb-2 uppercase">
+                      Select which issue to file:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {analysis.resolutionOptions?.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => handleResolveConflict(opt.category, opt.title)}
+                          className="text-left p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 hover:border-[#22C55E]/50 transition-all group"
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="text-xs font-bold text-white group-hover:text-[#22C55E] font-display">
+                              {opt.label}
+                            </span>
+                            <span className="text-[10px] font-mono text-white/40 uppercase">
+                              {opt.category}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-white/60 leading-normal font-sans">
+                            {opt.explanation}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {duplicateInfo && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -297,9 +373,9 @@ const AIAnalysisPage: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="font-black text-white text-sm font-display">AI INTELLIGENCE REPORT</p>
-                          <span className="telemetry-chip-green">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
-                            VERIFIED
+                          <span className={analysis.hasConflict && !conflictResolved ? 'telemetry-chip text-[#E10600] bg-[#E10600]/10 border-[#E10600]/30' : 'telemetry-chip-green'}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${analysis.hasConflict && !conflictResolved ? 'bg-[#E10600]' : 'bg-[#22C55E]'} animate-pulse`} />
+                            {analysis.hasConflict && !conflictResolved ? 'UNRESOLVED CONFLICT' : 'VERIFIED CLASSIFICATION'}
                           </span>
                         </div>
                         <p className="text-white/40 text-xs font-mono">AUTONOMOUS MUNICIPAL CLASSIFICATION</p>
@@ -307,11 +383,33 @@ const AIAnalysisPage: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-1.5 bg-[#FFC400]/10 border border-[#FFC400]/30 px-3 py-1.5 rounded-xl">
                       <span className="text-base font-black font-mono text-[#FFC400]">{analysis.confidence}%</span>
-                      <span className="text-[10px] font-mono text-[#FFC400] uppercase font-bold">CONFIDENCE</span>
+                      <span className="text-[10px] font-mono text-[#FFC400] uppercase font-bold">{analysis.confidenceQuality} CONFIDENCE</span>
                     </div>
                   </div>
 
                   <h3 className="text-lg font-bold text-white mb-2 font-display">{analysis.title}</h3>
+
+                  {/* Knowledge States Telemetry */}
+                  {analysis.knowledgeState && (
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-white/70">
+                        TEXT: <strong className="text-white">{analysis.knowledgeState.textFact}</strong>
+                      </span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
+                        analysis.knowledgeState.visualEvidence === 'CONFLICTING'
+                          ? 'bg-[#E10600]/10 border-[#E10600]/30 text-[#E10600]'
+                          : 'bg-white/5 border-white/10 text-white/70'
+                      }`}>
+                        VISUAL: <strong className="text-white">{analysis.knowledgeState.visualEvidence}</strong>
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-white/70">
+                        DURATION: <strong className="text-white">{analysis.knowledgeState.duration}</strong>
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-white/70">
+                        JURISDICTION: <strong className="text-white">{analysis.knowledgeState.jurisdiction}</strong>
+                      </span>
+                    </div>
+                  )}
 
                   {/* Reasoning stream */}
                   <div className="bg-[#181818] border border-white/8 rounded-2xl p-3.5 mt-3">
@@ -381,13 +479,20 @@ const AIAnalysisPage: React.FC = () => {
                 <motion.button
                   {...buttonGestures}
                   onClick={handleConfirm}
-                  disabled={submitting}
-                  className="btn-primary justify-center py-4 text-sm font-bold glow-red font-display"
+                  disabled={submitting || (analysis.hasConflict && !conflictResolved)}
+                  className={`btn-primary justify-center py-4 text-sm font-bold glow-red font-display ${
+                    analysis.hasConflict && !conflictResolved ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
                   {submitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
                       <span>Submitting...</span>
+                    </>
+                  ) : analysis.hasConflict && !conflictResolved ? (
+                    <>
+                      <AlertCircle className="w-5 h-5 text-[#E10600]" />
+                      <span>Resolve Contradiction to Submit</span>
                     </>
                   ) : (
                     <>
