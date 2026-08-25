@@ -1,22 +1,69 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, MapPin, PhoneCall, ShieldAlert, Cpu, Sparkles,
-  CheckCircle2, AlertTriangle, Radio, Activity, Zap, Layers,
-  Compass, Eye, Crosshair, Terminal, Clock, ShieldCheck, Check
+  ArrowRight, MapPin, PhoneCall, Cpu,
+  CheckCircle2, Activity, Zap,
+  Crosshair, ShieldCheck, Check
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { getMineComplaints } from '../services/complaintService';
+import type { Complaint } from '../types';
 
 const TOTAL_FRAMES = 160;
 
+// ── 3D Geometry Types ────────────────────────────────────────────────────────
 interface Building {
   x: number;
   z: number;
   w: number;
   d: number;
   h: number;
-  type: 'tower' | 'hub' | 'residential' | 'sensor';
+  type: 'tower' | 'hub' | 'civic_hall' | 'transit_hub' | 'residential' | 'sensor' | 'utility' | 'commercial';
   color: string;
+  roofDetails?: 'spire' | 'dome' | 'colonnade' | 'canopy' | 'helipad' | 'tiered';
+}
+
+interface RoadSegment {
+  x1: number;
+  z1: number;
+  x2: number;
+  z2: number;
+  width: number;
+  hasDashedLine?: boolean;
+}
+
+interface CivicPlaza {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  type: 'plaza' | 'park' | 'station';
+}
+
+interface CitizenFigure {
+  id: string;
+  x: number;
+  z: number;
+  height: number;
+  posture: 'walking' | 'standing' | 'group' | 'waiting' | 'sitting' | 'parent_child' | 'wheelchair' | 'commuter';
+  heading: number;
+  speed: number;
+  pathLength: number;
+  pathAxis: 'x' | 'z';
+  originX: number;
+  originZ: number;
+  hasTelemetryPing?: boolean;
+  pingColor?: string;
+  pingLabel?: string;
+  groupCount?: number;
+}
+
+interface LightNode {
+  x: number;
+  z: number;
+  h: number;
+  color: string;
+  radius: number;
 }
 
 export const Civic3DHero: React.FC = () => {
@@ -26,39 +73,267 @@ export const Civic3DHero: React.FC = () => {
 
   const [progress, setProgress] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(1);
-  const [isLoaded, setIsLoaded] = useState(true);
-  const [loadPercent, setLoadPercent] = useState(100);
 
   // Scanner dynamic metrics
   const [activeHazardIndex, setActiveHazardIndex] = useState(0);
   const [liveConfidence, setLiveConfidence] = useState(99.4);
   const [flowStep, setFlowStep] = useState(1);
 
-  // Reference for smooth animation frame loop
+  // Real-time complaints data
+  const [latestComplaint, setLatestComplaint] = useState<Complaint | null>(null);
+
+  // Reference for smooth animation frame loop & mouse parallax
   const animFrameIdRef = useRef<number | null>(null);
   const scrollProgressRef = useRef(0);
+  const mousePosRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 });
 
-  // 3D City building procedural data for background atmosphere
+  // ── 3D City Infrastructure (Municipal Dome, Halls, Transit, Residential, Commercial) ─
   const buildingsRef = useRef<Building[]>([
-    { x: 0, z: 0, w: 75, d: 75, h: 230, type: 'tower', color: '#E10600' },
-    { x: -95, z: -85, w: 60, d: 50, h: 145, type: 'hub', color: '#FFC400' },
-    { x: 95, z: -85, w: 55, d: 55, h: 165, type: 'hub', color: '#E10600' },
-    { x: -105, z: 85, w: 65, d: 60, h: 135, type: 'residential', color: '#3A3A3A' },
-    { x: 105, z: 95, w: 60, d: 60, h: 175, type: 'tower', color: '#FFC400' },
-    { x: -190, z: -45, w: 45, d: 50, h: 115, type: 'sensor', color: '#2E2E2E' },
-    { x: 190, z: -45, w: 50, d: 45, h: 125, type: 'sensor', color: '#2E2E2E' },
-    { x: -175, z: 125, w: 55, d: 50, h: 100, type: 'residential', color: '#3A3A3A' },
-    { x: 175, z: 135, w: 50, d: 55, h: 110, type: 'residential', color: '#3A3A3A' },
-    { x: 0, z: -175, w: 85, d: 40, h: 155, type: 'hub', color: '#E10600' },
-    { x: 0, z: 185, w: 80, d: 45, h: 140, type: 'sensor', color: '#2E2E2E' },
-    { x: -260, z: -155, w: 40, d: 40, h: 85, type: 'sensor', color: '#2E2E2E' },
-    { x: 260, z: -155, w: 40, d: 40, h: 90, type: 'sensor', color: '#2E2E2E' },
-    { x: -250, z: 185, w: 45, d: 45, h: 80, type: 'residential', color: '#2E2E2E' },
-    { x: 250, z: 195, w: 40, d: 40, h: 95, type: 'sensor', color: '#2E2E2E' },
+    // Central Core Command Matrix Tower
+    { x: 0, z: 0, w: 75, d: 75, h: 235, type: 'tower', color: '#E10600', roofDetails: 'spire' },
+    
+    // Grand Municipal Civic Hall with Colonnade (North-West)
+    { x: -95, z: -85, w: 72, d: 58, h: 145, type: 'civic_hall', color: '#FFC400', roofDetails: 'dome' },
+    
+    // Emergency Operations & Dispatch Depot (North-East)
+    { x: 95, z: -85, w: 62, d: 55, h: 165, type: 'hub', color: '#E10600', roofDetails: 'helipad' },
+    
+    // Public Transit & Metro Interchange Hub (South-West)
+    { x: -105, z: 85, w: 75, d: 65, h: 110, type: 'transit_hub', color: '#3A3A3A', roofDetails: 'canopy' },
+    
+    // Commercial Financial & Tech Nexus (South-East)
+    { x: 105, z: 95, w: 65, d: 65, h: 180, type: 'commercial', color: '#FFC400', roofDetails: 'tiered' },
+    
+    // Water & Utilities Plant (West)
+    { x: -190, z: -45, w: 52, d: 55, h: 120, type: 'utility', color: '#2E2E2E' },
+    
+    // Power & Grid Station (East)
+    { x: 190, z: -45, w: 55, d: 52, h: 130, type: 'utility', color: '#2E2E2E' },
+    
+    // Residential Quarter 1 (South-West mid)
+    { x: -175, z: 125, w: 60, d: 55, h: 105, type: 'residential', color: '#3A3A3A', roofDetails: 'tiered' },
+    
+    // Residential Quarter 2 (South-East mid)
+    { x: 175, z: 135, w: 55, d: 60, h: 115, type: 'residential', color: '#3A3A3A', roofDetails: 'tiered' },
+    
+    // Municipal Services Annex (North Far)
+    { x: 0, z: -175, w: 90, d: 45, h: 155, type: 'civic_hall', color: '#E10600', roofDetails: 'colonnade' },
+    
+    // Smart Sensor Hub (South Far)
+    { x: 0, z: 185, w: 85, d: 50, h: 140, type: 'sensor', color: '#2E2E2E' },
+    
+    // Outer Grid Towers
+    { x: -260, z: -155, w: 45, d: 45, h: 90, type: 'residential', color: '#252525' },
+    { x: 260, z: -155, w: 45, d: 45, h: 95, type: 'commercial', color: '#252525' },
+    { x: -250, z: 185, w: 50, d: 50, h: 85, type: 'residential', color: '#252525' },
+    { x: 250, z: 195, w: 45, d: 45, h: 100, type: 'sensor', color: '#252525' },
+    { x: -310, z: 20, w: 40, d: 40, h: 75, type: 'residential', color: '#202020' },
+    { x: 310, z: 20, w: 40, d: 40, h: 80, type: 'commercial', color: '#202020' },
   ]);
 
-  // Optical Triage hazards data
-  const hazards = [
+  // ── Road Infrastructure Network ───────────────────────────────────────────
+  const roadsRef = useRef<RoadSegment[]>([
+    // Main North-South Civic Boulevard
+    { x1: 0, z1: -420, x2: 0, z2: 420, width: 36, hasDashedLine: true },
+    // East-West Arterial Avenue
+    { x1: -420, z1: 0, x2: 420, z2: 0, width: 36, hasDashedLine: true },
+    // North Perimeter Road
+    { x1: -380, z1: -130, x2: 380, z2: -130, width: 22, hasDashedLine: true },
+    // South Perimeter Road
+    { x1: -380, z1: 140, x2: 380, z2: 140, width: 22, hasDashedLine: true },
+    // West Cross Connector
+    { x1: -140, z1: -380, x2: -140, z2: 380, width: 22, hasDashedLine: true },
+    // East Cross Connector
+    { x1: 140, z1: -380, x2: 140, z2: 380, width: 22, hasDashedLine: true },
+  ]);
+
+  // ── Public Plazas & Pedestrian Squares ─────────────────────────────────────
+  const plazasRef = useRef<CivicPlaza[]>([
+    // Central Civic Square (around core command matrix)
+    { x: 0, z: 0, w: 140, d: 140, type: 'plaza' },
+    // Municipal Hall Forecourt (North-West)
+    { x: -95, z: -40, w: 65, d: 38, type: 'plaza' },
+    // Transit Hub Passenger Concourse (South-West)
+    { x: -105, z: 45, w: 70, d: 38, type: 'station' },
+    // Commercial Tech Plaza (South-East)
+    { x: 105, z: 50, w: 65, d: 38, type: 'plaza' },
+  ]);
+
+  // ── Smart Sensor Nodes & Streetlights ──────────────────────────────────────
+  const lightNodesRef = useRef<LightNode[]>([
+    { x: -45, z: -45, h: 22, color: '#22C55E', radius: 35 },
+    { x: 45, z: -45, h: 22, color: '#E10600', radius: 35 },
+    { x: -45, z: 45, h: 22, color: '#FFC400', radius: 35 },
+    { x: 45, z: 45, h: 22, color: '#22C55E', radius: 35 },
+    { x: 0, z: -100, h: 20, color: '#E10600', radius: 30 },
+    { x: 0, z: 100, h: 20, color: '#FFC400', radius: 30 },
+    { x: -100, z: 0, h: 20, color: '#22C55E', radius: 30 },
+    { x: 100, z: 0, h: 20, color: '#E10600', radius: 30 },
+  ]);
+
+  // ── Diverse 3D Civilian Silhouettes & Public Groups Across City ───────────
+  const citizensRef = useRef<CitizenFigure[]>([
+    // 1. Parent holding hand with Child (Walking along Central Plaza promenade)
+    {
+      id: 'cit-parent-child',
+      x: -18,
+      z: -18,
+      originX: -18,
+      originZ: -18,
+      height: 15.5,
+      posture: 'parent_child',
+      heading: 0.2,
+      speed: 0.35,
+      pathLength: 75,
+      pathAxis: 'x',
+      hasTelemetryPing: true,
+      pingColor: '#22C55E',
+      pingLabel: 'PUBLIC PROTECTION',
+    },
+    // 2. Citizen in Wheelchair with Companion (Accessibility representation near Municipal Hall)
+    {
+      id: 'cit-wheelchair-1',
+      x: -75,
+      z: -38,
+      originX: -75,
+      originZ: -38,
+      height: 14,
+      posture: 'wheelchair',
+      heading: 0.1,
+      speed: 0.3,
+      pathLength: 60,
+      pathAxis: 'x',
+      hasTelemetryPing: true,
+      pingColor: '#FFC400',
+      pingLabel: 'ACCESSIBLE CORRIDOR',
+    },
+    // 3. Citizen Sitting on Plaza Bench (Resting / looking at civic matrix)
+    {
+      id: 'cit-bench-1',
+      x: 35,
+      z: -26,
+      originX: 35,
+      originZ: -26,
+      height: 13.5,
+      posture: 'sitting',
+      heading: -0.4,
+      speed: 0,
+      pathLength: 0,
+      pathAxis: 'x',
+    },
+    // 4. Small Group of 3 Citizens Conversing in Central Square
+    {
+      id: 'cit-group-1',
+      x: -32,
+      z: 22,
+      originX: -32,
+      originZ: 22,
+      height: 15,
+      posture: 'group',
+      groupCount: 3,
+      heading: 0.8,
+      speed: 0,
+      pathLength: 0,
+      pathAxis: 'x',
+      hasTelemetryPing: true,
+      pingColor: '#22C55E',
+      pingLabel: 'COMMUNITY VOICE',
+    },
+    // 5. Commuter with Bag walking towards Transit Concourse
+    {
+      id: 'cit-commuter-1',
+      x: -85,
+      z: 50,
+      originX: -85,
+      originZ: 50,
+      height: 15.5,
+      posture: 'commuter',
+      heading: Math.PI / 2,
+      speed: 0.45,
+      pathLength: 80,
+      pathAxis: 'z',
+      hasTelemetryPing: true,
+      pingColor: '#FFC400',
+      pingLabel: 'TRANSIT GATE',
+    },
+    // 6. Pedestrians Waiting at Crosswalk
+    {
+      id: 'cit-wait-crosswalk',
+      x: 18,
+      z: 42,
+      originX: 18,
+      originZ: 42,
+      height: 15,
+      posture: 'waiting',
+      heading: -Math.PI / 2,
+      speed: 0,
+      pathLength: 0,
+      pathAxis: 'z',
+    },
+    // 7. Pedestrian Walking along East Arterial Sidewalk
+    {
+      id: 'cit-walk-east',
+      x: 70,
+      z: 14,
+      originX: 70,
+      originZ: 14,
+      height: 14.8,
+      posture: 'walking',
+      heading: 0,
+      speed: 0.48,
+      pathLength: 95,
+      pathAxis: 'x',
+    },
+    // 8. Standing Citizen using mobile civic app (East Tech Plaza)
+    {
+      id: 'cit-stand-app',
+      x: 95,
+      z: 55,
+      originX: 95,
+      originZ: 55,
+      height: 15,
+      posture: 'standing',
+      heading: -1.4,
+      speed: 0,
+      pathLength: 0,
+      pathAxis: 'x',
+      hasTelemetryPing: true,
+      pingColor: '#E10600',
+      pingLabel: 'ACTIVE REPORT',
+    },
+    // 9. Two Citizens Conversing near Residential Quarter (South)
+    {
+      id: 'cit-group-res',
+      x: -160,
+      z: 120,
+      originX: -160,
+      originZ: 120,
+      height: 14.5,
+      posture: 'group',
+      groupCount: 2,
+      heading: 1.5,
+      speed: 0,
+      pathLength: 0,
+      pathAxis: 'x',
+    },
+    // 10. Pedestrian Walking near Utility Center (West)
+    {
+      id: 'cit-walk-west',
+      x: -170,
+      z: -30,
+      originX: -170,
+      originZ: -30,
+      height: 14.5,
+      posture: 'walking',
+      heading: Math.PI,
+      speed: 0.4,
+      pathLength: 70,
+      pathAxis: 'x',
+    },
+  ]);
+
+  // Optical Triage hazards data (fallback + dynamic seed)
+  const defaultHazards = [
     {
       id: '01',
       title: 'SEVERE ROAD CAVITATION / CRATER',
@@ -103,28 +378,72 @@ export const Civic3DHero: React.FC = () => {
   // Cycling timer for scanner highlights
   useEffect(() => {
     const timer = setInterval(() => {
-      setActiveHazardIndex((prev) => (prev + 1) % hazards.length);
+      setActiveHazardIndex((prev) => (prev + 1) % defaultHazards.length);
       setFlowStep((prev) => (prev % 5) + 1);
       setLiveConfidence((prev) => +(98.5 + Math.random() * 1.3).toFixed(1));
     }, 2800);
     return () => clearInterval(timer);
+  }, [defaultHazards.length]);
+
+  // Real-time complaints state sync
+  const fetchActiveComplaints = useCallback(async () => {
+    try {
+      const mine = await getMineComplaints();
+      if (mine && mine.length > 0) {
+        setLatestComplaint(mine[0]);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
-  // 1. Procedural 3D Background Civic Neural Grid & Holographic Wireframes
-  const renderBackgroundCanvas = useCallback((ctx: CanvasRenderingContext2D, width: number, height: number, scrubProgress: number) => {
+  useEffect(() => {
+    void fetchActiveComplaints();
+    const handleUpdate = () => void fetchActiveComplaints();
+    window.addEventListener('complaints:updated', handleUpdate);
+    return () => window.removeEventListener('complaints:updated', handleUpdate);
+  }, [fetchActiveComplaints]);
+
+  // Mouse parallax tracking
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const normX = (e.clientX / window.innerWidth - 0.5) * 2;
+      const normY = (e.clientY / window.innerHeight - 0.5) * 2;
+      mousePosRef.current.targetX = normX;
+      mousePosRef.current.targetY = normY;
+    };
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  // ── Procedural 3D Canvas Rendering Engine ─────────────────────────────────
+  const renderBackgroundCanvas = useCallback((
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    scrubProgress: number,
+    timeMs: number
+  ) => {
     ctx.clearRect(0, 0, width, height);
 
     // Deep Obsidian Backdrop
     ctx.fillStyle = '#090909';
     ctx.fillRect(0, 0, width, height);
 
-    const centerX = width / 2;
-    const centerY = height * 0.52;
+    // Smooth mouse parallax interpolation
+    mousePosRef.current.x += (mousePosRef.current.targetX - mousePosRef.current.x) * 0.05;
+    mousePosRef.current.y += (mousePosRef.current.targetY - mousePosRef.current.y) * 0.05;
+
+    const mouseOffsetX = mousePosRef.current.x * 24;
+    const mouseOffsetY = mousePosRef.current.y * 16;
+
+    const centerX = width / 2 + mouseOffsetX;
+    const centerY = height * 0.52 + mouseOffsetY;
     const baseScale = Math.min(width, height) / 950;
 
-    // 360° Camera rotation driven by scroll progress
-    const angle = scrubProgress * Math.PI * 2 + Math.PI * 0.25;
-    const pitch = 0.55;
+    // 360° Camera rotation driven by scroll progress + slight dynamic breathing
+    const angle = scrubProgress * Math.PI * 2 + Math.PI * 0.25 + (mousePosRef.current.x * 0.04);
+    const pitch = 0.55 + (mousePosRef.current.y * 0.03);
     const cosA = Math.cos(angle);
     const sinA = Math.sin(angle);
 
@@ -137,7 +456,7 @@ export const Civic3DHero: React.FC = () => {
       return { x: px, y: py, depth };
     };
 
-    // Ground Wireframe Grid
+    // 1. Ground Wireframe Grid
     const gridSize = 450;
     const gridStep = 45;
     ctx.lineWidth = 1;
@@ -160,9 +479,76 @@ export const Civic3DHero: React.FC = () => {
       ctx.stroke();
     }
 
-    // Rotating Radar Sweep
+    // 2. Render 3D Arterial Roads & Lane Markings
+    roadsRef.current.forEach((road) => {
+      const halfW = road.width / 2;
+      const isNS = Math.abs(road.x1 - road.x2) < Math.abs(road.z1 - road.z2);
+
+      let p0, p1, p2, p3;
+      if (isNS) {
+        p0 = project(road.x1 - halfW, 0.2, road.z1);
+        p1 = project(road.x1 + halfW, 0.2, road.z1);
+        p2 = project(road.x2 + halfW, 0.2, road.z2);
+        p3 = project(road.x2 - halfW, 0.2, road.z2);
+      } else {
+        p0 = project(road.x1, 0.2, road.z1 - halfW);
+        p1 = project(road.x2, 0.2, road.z2 - halfW);
+        p2 = project(road.x2, 0.2, road.z2 + halfW);
+        p3 = project(road.x1, 0.2, road.z1 + halfW);
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(14, 14, 16, 0.65)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Dashed Centerline
+      if (road.hasDashedLine) {
+        ctx.beginPath();
+        const start = project(road.x1, 0.4, road.z1);
+        const end = project(road.x2, 0.4, road.z2);
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.setLineDash([8, 8]);
+        ctx.strokeStyle = 'rgba(255, 196, 0, 0.15)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    });
+
+    // 3. Render Public Plazas & Pedestrian Squares
+    plazasRef.current.forEach((plaza) => {
+      const halfW = plaza.w / 2;
+      const halfD = plaza.d / 2;
+      const p0 = project(plaza.x - halfW, 0.3, plaza.z - halfD);
+      const p1 = project(plaza.x + halfW, 0.3, plaza.z - halfD);
+      const p2 = project(plaza.x + halfW, 0.3, plaza.z + halfD);
+      const p3 = project(plaza.x - halfW, 0.3, plaza.z + halfD);
+
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.closePath();
+      ctx.fillStyle = plaza.type === 'station' ? 'rgba(34, 197, 94, 0.03)' : 'rgba(255, 255, 255, 0.02)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+
+    // 4. Rotating Radar Sweep
     const scanRadius = 380;
-    const scanAngle = (Date.now() * 0.0014) % (Math.PI * 2);
+    const scanAngle = (timeMs * 0.0014) % (Math.PI * 2);
     ctx.save();
     ctx.beginPath();
     const radarCenter = project(0, 0, 0);
@@ -184,101 +570,442 @@ export const Civic3DHero: React.FC = () => {
     ctx.stroke();
     ctx.restore();
 
-    // 3D Buildings
-    const sorted = buildingsRef.current.map((b) => {
-      const p = project(b.x, 0, b.z);
-      return { ...b, screenDepth: p.depth };
-    }).sort((a, b) => b.screenDepth - a.screenDepth);
-
-    sorted.forEach((b) => {
-      const halfW = b.w / 2;
-      const halfD = b.d / 2;
-      const h = b.h;
-
-      const b0 = project(b.x - halfW, 0, b.z - halfD);
-      const b1 = project(b.x + halfW, 0, b.z - halfD);
-      const b2 = project(b.x + halfW, 0, b.z + halfD);
-      const b3 = project(b.x - halfW, 0, b.z + halfD);
-
-      const t0 = project(b.x - halfW, h, b.z - halfD);
-      const t1 = project(b.x + halfW, h, b.z - halfD);
-      const t2 = project(b.x + halfW, h, b.z + halfD);
-      const t3 = project(b.x - halfW, h, b.z + halfD);
-
-      const isCore = b.type === 'tower' && b.x === 0;
-      const wallFill = isCore ? 'rgba(225, 6, 0, 0.08)' : 'rgba(18, 18, 18, 0.6)';
-      const wireColor = isCore ? 'rgba(225, 6, 0, 0.5)' : b.type === 'hub' ? 'rgba(255, 196, 0, 0.3)' : 'rgba(255, 255, 255, 0.08)';
-
-      const drawFace = (p0: { x: number; y: number }, p1: { x: number; y: number }, p2: { x: number; y: number }, p3: { x: number; y: number }) => {
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        ctx.lineTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.lineTo(p3.x, p3.y);
-        ctx.closePath();
-        ctx.fillStyle = wallFill;
-        ctx.fill();
-        ctx.strokeStyle = wireColor;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      };
-
-      drawFace(b0, b1, t1, t0);
-      drawFace(b1, b2, t2, t1);
-      drawFace(b2, b3, t3, t2);
-      drawFace(b3, b0, t0, t3);
-
-      ctx.beginPath();
-      ctx.moveTo(t0.x, t0.y);
-      ctx.lineTo(t1.x, t1.y);
-      ctx.lineTo(t2.x, t2.y);
-      ctx.lineTo(t3.x, t3.y);
-      ctx.closePath();
-      ctx.fillStyle = isCore ? 'rgba(225, 6, 0, 0.15)' : 'rgba(24, 24, 24, 0.7)';
-      ctx.fill();
-      ctx.strokeStyle = wireColor;
-      ctx.stroke();
-
-      if (isCore) {
-        const spireTop = project(b.x, h + 50, b.z);
-        ctx.beginPath();
-        ctx.moveTo((t0.x + t2.x) / 2, (t0.y + t2.y) / 2);
-        ctx.lineTo(spireTop.x, spireTop.y);
-        ctx.strokeStyle = 'rgba(225, 6, 0, 0.7)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        const pulseSize = 4 + Math.sin(Date.now() * 0.005) * 2;
-        ctx.beginPath();
-        ctx.arc(spireTop.x, spireTop.y, pulseSize, 0, Math.PI * 2);
-        ctx.fillStyle = '#E10600';
-        ctx.shadowColor = '#E10600';
-        ctx.shadowBlur = 10;
-        ctx.fill();
-        ctx.shadowBlur = 0;
+    // 5. Update Citizen Positions & Animate Walk Cycles
+    citizensRef.current.forEach((cit) => {
+      if ((cit.posture === 'walking' || cit.posture === 'parent_child' || cit.posture === 'commuter' || cit.posture === 'wheelchair') && cit.pathLength > 0) {
+        const t = (timeMs * 0.001 * cit.speed) % 2;
+        const progressVal = t < 1 ? t : 2 - t; // back and forth
+        if (cit.pathAxis === 'x') {
+          cit.x = cit.originX + (progressVal - 0.5) * cit.pathLength;
+        } else {
+          cit.z = cit.originZ + (progressVal - 0.5) * cit.pathLength;
+        }
       }
     });
 
-    // Faint laser scanline
-    const scanlineY = ((Date.now() * 0.1) % height);
+    // 6. Collect & Depth-Sort All 3D Scene Elements (Buildings, Citizens, Light Poles)
+    type RenderItem = 
+      | { kind: 'building'; data: Building; depth: number }
+      | { kind: 'citizen'; data: CitizenFigure; depth: number }
+      | { kind: 'light'; data: LightNode; depth: number };
+
+    const sceneItems: RenderItem[] = [];
+
+    buildingsRef.current.forEach((b) => {
+      const p = project(b.x, 0, b.z);
+      sceneItems.push({ kind: 'building', data: b, depth: p.depth });
+    });
+
+    citizensRef.current.forEach((c) => {
+      const p = project(c.x, 0, c.z);
+      sceneItems.push({ kind: 'citizen', data: c, depth: p.depth });
+    });
+
+    lightNodesRef.current.forEach((l) => {
+      const p = project(l.x, 0, l.z);
+      sceneItems.push({ kind: 'light', data: l, depth: p.depth });
+    });
+
+    // Sort from back to front (largest depth to smallest)
+    sceneItems.sort((a, b) => b.depth - a.depth);
+
+    // 7. Render All Scene Items
+    sceneItems.forEach((item) => {
+      // ── BUILDINGS ──
+      if (item.kind === 'building') {
+        const b = item.data;
+        const halfW = b.w / 2;
+        const halfD = b.d / 2;
+        const h = b.h;
+
+        const b0 = project(b.x - halfW, 0, b.z - halfD);
+        const b1 = project(b.x + halfW, 0, b.z - halfD);
+        const b2 = project(b.x + halfW, 0, b.z + halfD);
+        const b3 = project(b.x - halfW, 0, b.z + halfD);
+
+        const t0 = project(b.x - halfW, h, b.z - halfD);
+        const t1 = project(b.x + halfW, h, b.z - halfD);
+        const t2 = project(b.x + halfW, h, b.z + halfD);
+        const t3 = project(b.x - halfW, h, b.z + halfD);
+
+        const isCore = b.type === 'tower' && b.x === 0;
+        const isCivic = b.type === 'civic_hall';
+        const isTransit = b.type === 'transit_hub';
+
+        const wallFill = isCore
+          ? 'rgba(225, 6, 0, 0.08)'
+          : isCivic
+          ? 'rgba(255, 196, 0, 0.04)'
+          : isTransit
+          ? 'rgba(34, 197, 94, 0.04)'
+          : 'rgba(16, 16, 18, 0.65)';
+
+        const wireColor = isCore
+          ? 'rgba(225, 6, 0, 0.5)'
+          : b.type === 'hub' || b.type === 'civic_hall'
+          ? 'rgba(255, 196, 0, 0.3)'
+          : isTransit
+          ? 'rgba(34, 197, 94, 0.3)'
+          : 'rgba(255, 255, 255, 0.08)';
+
+        const drawFace = (p0: { x: number; y: number }, p1: { x: number; y: number }, p2: { x: number; y: number }, p3: { x: number; y: number }) => {
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y);
+          ctx.lineTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.lineTo(p3.x, p3.y);
+          ctx.closePath();
+          ctx.fillStyle = wallFill;
+          ctx.fill();
+          ctx.strokeStyle = wireColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        };
+
+        drawFace(b0, b1, t1, t0);
+        drawFace(b1, b2, t2, t1);
+        drawFace(b2, b3, t3, t2);
+        drawFace(b3, b0, t0, t3);
+
+        // Roof Slab
+        ctx.beginPath();
+        ctx.moveTo(t0.x, t0.y);
+        ctx.lineTo(t1.x, t1.y);
+        ctx.lineTo(t2.x, t2.y);
+        ctx.lineTo(t3.x, t3.y);
+        ctx.closePath();
+        ctx.fillStyle = isCore ? 'rgba(225, 6, 0, 0.16)' : 'rgba(22, 22, 26, 0.75)';
+        ctx.fill();
+        ctx.strokeStyle = wireColor;
+        ctx.stroke();
+
+        // Architectural Details
+        if (isCore) {
+          const spireTop = project(b.x, h + 50, b.z);
+          ctx.beginPath();
+          ctx.moveTo((t0.x + t2.x) / 2, (t0.y + t2.y) / 2);
+          ctx.lineTo(spireTop.x, spireTop.y);
+          ctx.strokeStyle = 'rgba(225, 6, 0, 0.7)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          const pulseSize = 4 + Math.sin(timeMs * 0.005) * 2;
+          ctx.beginPath();
+          ctx.arc(spireTop.x, spireTop.y, pulseSize, 0, Math.PI * 2);
+          ctx.fillStyle = '#E10600';
+          ctx.shadowColor = '#E10600';
+          ctx.shadowBlur = 10;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        } else if (b.roofDetails === 'dome') {
+          // Architectural Municipal Dome
+          const domeCenter = project(b.x, h, b.z);
+          const domeApex = project(b.x, h + 24, b.z);
+          const domeRadius = (b.w * 0.28) * baseScale;
+
+          ctx.beginPath();
+          ctx.arc(domeCenter.x, domeCenter.y, domeRadius, Math.PI, 0);
+          ctx.fillStyle = 'rgba(255, 196, 0, 0.08)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 196, 0, 0.4)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Dome finial
+          ctx.beginPath();
+          ctx.moveTo(domeCenter.x, domeCenter.y - domeRadius);
+          ctx.lineTo(domeApex.x, domeApex.y);
+          ctx.strokeStyle = 'rgba(255, 196, 0, 0.6)';
+          ctx.stroke();
+        }
+      }
+
+      // ── SMART SENSOR LIGHT POLES ──
+      else if (item.kind === 'light') {
+        const l = item.data;
+        const pBase = project(l.x, 0, l.z);
+        const pTop = project(l.x, l.h, l.z);
+
+        // Ground illumination pool
+        ctx.beginPath();
+        ctx.ellipse(pBase.x, pBase.y, l.radius * baseScale, l.radius * baseScale * 0.45, 0, 0, Math.PI * 2);
+        ctx.fillStyle = `${l.color}08`;
+        ctx.fill();
+
+        // Pole line
+        ctx.beginPath();
+        ctx.moveTo(pBase.x, pBase.y);
+        ctx.lineTo(pTop.x, pTop.y);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Sensor light beacon
+        ctx.beginPath();
+        ctx.arc(pTop.x, pTop.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = l.color;
+        ctx.fill();
+      }
+
+      // ── SUBTLE 3D CITIZEN SILHOUETTES & GROUPS ──
+      else if (item.kind === 'citizen') {
+        const c = item.data;
+        const pBase = project(c.x, 0, c.z);
+        const pHead = project(c.x, c.height, c.z);
+
+        const screenH = Math.max(8, pBase.y - pHead.y);
+        const screenW = screenH * 0.38;
+
+        // Ground Contact Shadow
+        ctx.beginPath();
+        ctx.ellipse(pBase.x, pBase.y, screenW * 1.25, screenW * 0.35, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fill();
+
+        // Silhouette color (dark, low-contrast, atmospheric)
+        const citizenAlpha = 0.22;
+        ctx.fillStyle = `rgba(220, 225, 235, ${citizenAlpha})`;
+        ctx.strokeStyle = `rgba(255, 255, 255, 0.08)`;
+        ctx.lineWidth = 0.75;
+
+        // Render based on posture
+        if (c.posture === 'parent_child') {
+          // Parent + Child walking holding hands
+          const parentX = pBase.x - screenW * 0.4;
+          const childX = pBase.x + screenW * 0.45;
+          const childH = screenH * 0.65;
+          const childHeadY = pBase.y - childH;
+
+          // Parent Head & Body
+          ctx.beginPath();
+          ctx.arc(parentX, pHead.y + screenH * 0.14, screenH * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(parentX - screenW * 0.35, pHead.y + screenH * 0.25);
+          ctx.lineTo(parentX + screenW * 0.35, pHead.y + screenH * 0.25);
+          ctx.lineTo(parentX + screenW * 0.25, pHead.y + screenH * 0.6);
+          ctx.lineTo(parentX + screenW * 0.25, pBase.y);
+          ctx.lineTo(parentX + screenW * 0.05, pBase.y);
+          ctx.lineTo(parentX, pHead.y + screenH * 0.65);
+          ctx.lineTo(parentX - screenW * 0.05, pBase.y);
+          ctx.lineTo(parentX - screenW * 0.25, pBase.y);
+          ctx.lineTo(parentX - screenW * 0.25, pHead.y + screenH * 0.6);
+          ctx.closePath();
+          ctx.fill();
+
+          // Child Head & Body
+          ctx.beginPath();
+          ctx.arc(childX, childHeadY + childH * 0.15, childH * 0.13, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(childX - screenW * 0.25, childHeadY + childH * 0.28);
+          ctx.lineTo(childX + screenW * 0.25, childHeadY + childH * 0.28);
+          ctx.lineTo(childX + screenW * 0.2, pBase.y);
+          ctx.lineTo(childX - screenW * 0.2, pBase.y);
+          ctx.closePath();
+          ctx.fill();
+
+          // Holding hands link
+          ctx.beginPath();
+          ctx.moveTo(parentX + screenW * 0.2, pHead.y + screenH * 0.5);
+          ctx.lineTo(childX - screenW * 0.15, childHeadY + childH * 0.45);
+          ctx.strokeStyle = `rgba(220, 225, 235, ${citizenAlpha})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else if (c.posture === 'wheelchair') {
+          // Citizen in wheelchair with companion
+          const chairX = pBase.x - screenW * 0.3;
+          const compX = pBase.x + screenW * 0.5;
+
+          // Wheelchair wheel
+          ctx.beginPath();
+          ctx.arc(chairX, pBase.y - screenH * 0.25, screenH * 0.22, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 196, 0, 0.4)`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Seated Person Head & Body
+          ctx.beginPath();
+          ctx.arc(chairX, pHead.y + screenH * 0.22, screenH * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(chairX - screenW * 0.25, pHead.y + screenH * 0.35);
+          ctx.lineTo(chairX + screenW * 0.25, pHead.y + screenH * 0.35);
+          ctx.lineTo(chairX + screenW * 0.25, pBase.y - screenH * 0.2);
+          ctx.lineTo(chairX - screenW * 0.25, pBase.y - screenH * 0.2);
+          ctx.closePath();
+          ctx.fill();
+
+          // Standing Companion
+          ctx.beginPath();
+          ctx.arc(compX, pHead.y + screenH * 0.14, screenH * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(compX - screenW * 0.3, pHead.y + screenH * 0.25);
+          ctx.lineTo(compX + screenW * 0.3, pHead.y + screenH * 0.25);
+          ctx.lineTo(compX + screenW * 0.2, pBase.y);
+          ctx.lineTo(compX - screenW * 0.2, pBase.y);
+          ctx.closePath();
+          ctx.fill();
+        } else if (c.posture === 'group') {
+          const count = c.groupCount || 2;
+          for (let i = 0; i < count; i++) {
+            const offsetDist = (i - (count - 1) / 2) * (screenW * 1.2);
+            const figBaseX = pBase.x + offsetDist;
+            const figBaseY = pBase.y + (i === 1 ? -1 : 1);
+            const figHeadY = figBaseY - screenH;
+
+            // Head
+            ctx.beginPath();
+            ctx.arc(figBaseX, figHeadY + screenH * 0.14, screenH * 0.11, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Torso & Legs
+            ctx.beginPath();
+            ctx.moveTo(figBaseX - screenW * 0.45, figHeadY + screenH * 0.25);
+            ctx.lineTo(figBaseX + screenW * 0.45, figHeadY + screenH * 0.25);
+            ctx.lineTo(figBaseX + screenW * 0.35, figHeadY + screenH * 0.6);
+            ctx.lineTo(figBaseX + screenW * 0.4, figBaseY);
+            ctx.lineTo(figBaseX + screenW * 0.1, figBaseY);
+            ctx.lineTo(figBaseX, figHeadY + screenH * 0.65);
+            ctx.lineTo(figBaseX - screenW * 0.1, figBaseY);
+            ctx.lineTo(figBaseX - screenW * 0.4, figBaseY);
+            ctx.lineTo(figBaseX - screenW * 0.35, figHeadY + screenH * 0.6);
+            ctx.closePath();
+            ctx.fill();
+          }
+        } else if (c.posture === 'walking' || c.posture === 'commuter') {
+          const walkCycle = Math.sin(timeMs * 0.006 * (c.speed * 2.5) + Number(c.id.charCodeAt(c.id.length - 1))) * 0.35;
+
+          // Head
+          ctx.beginPath();
+          ctx.arc(pBase.x, pHead.y + screenH * 0.14, screenH * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Torso
+          ctx.beginPath();
+          ctx.moveTo(pBase.x - screenW * 0.45, pHead.y + screenH * 0.25);
+          ctx.lineTo(pBase.x + screenW * 0.45, pHead.y + screenH * 0.25);
+          ctx.lineTo(pBase.x + screenW * 0.3, pHead.y + screenH * 0.6);
+          ctx.lineTo(pBase.x - screenW * 0.3, pHead.y + screenH * 0.6);
+          ctx.closePath();
+          ctx.fill();
+
+          // Walking Legs (Dynamic swing)
+          const leg1X = pBase.x + (walkCycle * screenW * 0.9);
+          const leg2X = pBase.x - (walkCycle * screenW * 0.9);
+
+          ctx.beginPath();
+          ctx.moveTo(pBase.x - screenW * 0.15, pHead.y + screenH * 0.6);
+          ctx.lineTo(leg1X, pBase.y);
+          ctx.lineTo(leg1X + screenW * 0.2, pBase.y);
+          ctx.lineTo(pBase.x + screenW * 0.05, pHead.y + screenH * 0.6);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(pBase.x + screenW * 0.05, pHead.y + screenH * 0.6);
+          ctx.lineTo(leg2X, pBase.y);
+          ctx.lineTo(leg2X - screenW * 0.2, pBase.y);
+          ctx.lineTo(pBase.x + screenW * 0.25, pHead.y + screenH * 0.6);
+          ctx.closePath();
+          ctx.fill();
+
+          // Commuter bag shoulder strap
+          if (c.posture === 'commuter') {
+            ctx.beginPath();
+            ctx.moveTo(pBase.x - screenW * 0.4, pHead.y + screenH * 0.28);
+            ctx.lineTo(pBase.x + screenW * 0.35, pHead.y + screenH * 0.55);
+            ctx.strokeStyle = 'rgba(255, 196, 0, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        } else if (c.posture === 'sitting') {
+          // Sitting figure on plaza bench
+          ctx.beginPath();
+          ctx.arc(pBase.x, pHead.y + screenH * 0.14, screenH * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(pBase.x - screenW * 0.4, pHead.y + screenH * 0.25);
+          ctx.lineTo(pBase.x + screenW * 0.4, pHead.y + screenH * 0.25);
+          ctx.lineTo(pBase.x + screenW * 0.3, pHead.y + screenH * 0.55);
+          ctx.lineTo(pBase.x + screenW * 0.7, pHead.y + screenH * 0.55); // lap
+          ctx.lineTo(pBase.x + screenW * 0.7, pBase.y);
+          ctx.lineTo(pBase.x + screenW * 0.4, pBase.y);
+          ctx.lineTo(pBase.x + screenW * 0.4, pHead.y + screenH * 0.68);
+          ctx.lineTo(pBase.x - screenW * 0.3, pHead.y + screenH * 0.68);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Standing / Waiting upright figure
+          ctx.beginPath();
+          ctx.arc(pBase.x, pHead.y + screenH * 0.14, screenH * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(pBase.x - screenW * 0.45, pHead.y + screenH * 0.25);
+          ctx.lineTo(pBase.x + screenW * 0.45, pHead.y + screenH * 0.25);
+          ctx.lineTo(pBase.x + screenW * 0.35, pHead.y + screenH * 0.6);
+          ctx.lineTo(pBase.x + screenW * 0.35, pBase.y);
+          ctx.lineTo(pBase.x + screenW * 0.1, pBase.y);
+          ctx.lineTo(pBase.x, pHead.y + screenH * 0.65);
+          ctx.lineTo(pBase.x - screenW * 0.1, pBase.y);
+          ctx.lineTo(pBase.x - screenW * 0.35, pBase.y);
+          ctx.lineTo(pBase.x - screenW * 0.35, pHead.y + screenH * 0.6);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Faint Neural Telemetry Ping over active citizen clusters ("CivicResolve AI is serving the citizens")
+        if (c.hasTelemetryPing) {
+          const pingY = pHead.y - 6;
+          const pingColor = c.pingColor || '#22C55E';
+          const pingPulse = Math.sin(timeMs * 0.005 + Number(c.id.charCodeAt(c.id.length - 1))) * 0.5 + 0.5;
+
+          ctx.beginPath();
+          ctx.arc(pBase.x, pingY, 1.8 + pingPulse * 1.5, 0, Math.PI * 2);
+          ctx.fillStyle = pingColor;
+          ctx.shadowColor = pingColor;
+          ctx.shadowBlur = 6;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          // Faint vertical beacon line connecting citizen to civic neural grid
+          ctx.beginPath();
+          ctx.moveTo(pBase.x, pingY + 2);
+          ctx.lineTo(pBase.x, pHead.y + screenH * 0.08);
+          ctx.strokeStyle = `${pingColor}40`;
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+        }
+      }
+    });
+
+    // 8. Faint laser scanline
+    const scanlineY = ((timeMs * 0.08) % height);
     ctx.beginPath();
     ctx.moveTo(0, scanlineY);
     ctx.lineTo(width, scanlineY);
-    ctx.strokeStyle = 'rgba(225, 6, 0, 0.1)';
+    ctx.strokeStyle = 'rgba(225, 6, 0, 0.09)';
     ctx.lineWidth = 1;
     ctx.stroke();
   }, []);
 
-  // Continuous loop for background canvas
+  // Continuous animation loop for background canvas
   useEffect(() => {
     let isRunning = true;
-    const loop = () => {
+    const loop = (time: number) => {
       if (!isRunning) return;
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          renderBackgroundCanvas(ctx, canvas.width, canvas.height, scrollProgressRef.current);
+          renderBackgroundCanvas(ctx, canvas.width, canvas.height, scrollProgressRef.current, time);
         }
       }
       animFrameIdRef.current = requestAnimationFrame(loop);
@@ -328,7 +1055,12 @@ export const Civic3DHero: React.FC = () => {
     };
   }, []);
 
-  const activeHazard = hazards[activeHazardIndex];
+  const activeHazard = defaultHazards[activeHazardIndex];
+
+  // Dynamic Case ID & Department values from live state or active hazard
+  const activeCaseId = latestComplaint?.complaintNumber || latestComplaint?.id || '#CR-2026-9842';
+  const activeDept = latestComplaint?.department || 'BBMP Roads & Water';
+  const activeLocation = latestComplaint?.location || activeHazard.landmark;
 
   return (
     <div ref={containerRef} className="relative h-[480vh] bg-[#090909]">
@@ -338,7 +1070,7 @@ export const Civic3DHero: React.FC = () => {
         {/* Background 3D Canvas */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 h-full w-full object-cover pointer-events-none opacity-65"
+          className="absolute inset-0 h-full w-full object-cover pointer-events-none opacity-70"
         />
 
         {/* Cinematic Radial Obsidian Vignette */}
@@ -455,7 +1187,7 @@ export const Civic3DHero: React.FC = () => {
               <div className="relative rounded-3xl border border-white/10 bg-[#121212]/85 p-6 backdrop-blur-xl shadow-2xl space-y-4">
                 <div className="flex items-center justify-between border-b border-white/8 pb-3">
                   <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-[#E10600] animate-pulse" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#E10600] animate-ping" />
                     <span className="font-mono text-xs font-bold uppercase tracking-wider text-white">
                       AUTONOMOUS CIVIC RADAR
                     </span>
@@ -623,7 +1355,7 @@ export const Civic3DHero: React.FC = () => {
                     <Crosshair className="w-4 h-4 text-[#E10600] shrink-0" />
                     <div>
                       <span className="text-white/40 block uppercase">Target Incident</span>
-                      <span className="text-white font-bold truncate block">{activeHazard.landmark}</span>
+                      <span className="text-white font-bold truncate block">{activeLocation}</span>
                     </div>
                   </div>
                   <div className="bg-white/4 p-2.5 rounded-xl border border-white/6 flex items-center gap-2">
@@ -774,9 +1506,9 @@ export const Civic3DHero: React.FC = () => {
 
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-3 relative z-10">
                     {[
-                      { id: 1, label: 'INCIDENT INTAKE', desc: 'Case #CR-9842', sub: 'Photo + GPS Tagged', color: '#E10600' },
+                      { id: 1, label: 'INCIDENT INTAKE', desc: activeCaseId, sub: 'Photo + GPS Tagged', color: '#E10600' },
                       { id: 2, label: 'AI CLASSIFIER', desc: 'ResNet Vision ViT', sub: 'Severity: 9/10', color: '#FFC400' },
-                      { id: 3, label: 'MUNICIPAL DEPT', desc: 'BBMP Roads & Water', sub: 'Ward 12 Gateway', color: '#FFC400' },
+                      { id: 3, label: 'MUNICIPAL DEPT', desc: activeDept, sub: 'Ward 12 Gateway', color: '#FFC400' },
                       { id: 4, label: 'FIELD TEAM', desc: 'Unit #QRF-DELTA-4', sub: 'ETA: 14 Min En Route', color: '#22C55E' },
                       { id: 5, label: 'SLA LOCK', desc: 'Window: 2.4h', sub: 'Action Matrix Active', color: '#22C55E' },
                     ].map((step) => {
@@ -825,7 +1557,7 @@ export const Civic3DHero: React.FC = () => {
                 <div className="bg-[#090909] p-3.5 rounded-2xl border border-white/8 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-[10px]">
                   <div>
                     <span className="text-white/40 block">CASE ID:</span>
-                    <span className="text-white font-bold">#CR-2026-9842</span>
+                    <span className="text-white font-bold">{activeCaseId}</span>
                   </div>
                   <div>
                     <span className="text-white/40 block">DISPATCH UNIT:</span>
@@ -833,7 +1565,7 @@ export const Civic3DHero: React.FC = () => {
                   </div>
                   <div>
                     <span className="text-white/40 block">JURISDICTION:</span>
-                    <span className="text-white font-bold">WARD 12 (BBMP)</span>
+                    <span className="text-white font-bold truncate block">{activeDept}</span>
                   </div>
                   <div>
                     <span className="text-white/40 block">SLA COUNTDOWN:</span>
@@ -913,8 +1645,12 @@ export const Civic3DHero: React.FC = () => {
                   </div>
                   <div className="bg-white/4 p-3.5 rounded-2xl border border-white/6 space-y-1">
                     <span className="text-white/40 block uppercase">Citizen Feedback</span>
-                    <span className="text-[#FFC400] font-bold text-xs block">★★★★★ 5.0 / 5.0</span>
-                    <span className="text-white/50 text-[9px] block">Verified by Indiranagar Resident</span>
+                    <span className="text-[#FFC400] font-bold text-xs block">
+                      {latestComplaint?.citizenRating ? `★★★★★ ${latestComplaint.citizenRating}.0 / 5.0` : '★★★★★ 5.0 / 5.0'}
+                    </span>
+                    <span className="text-white/50 text-[9px] block">
+                      {latestComplaint?.citizenFeedback ? `"${latestComplaint.citizenFeedback}"` : 'Verified by Indiranagar Resident'}
+                    </span>
                   </div>
                   <div className="bg-white/4 p-3.5 rounded-2xl border border-white/6 space-y-1">
                     <span className="text-white/40 block uppercase">SLA Window Close</span>
