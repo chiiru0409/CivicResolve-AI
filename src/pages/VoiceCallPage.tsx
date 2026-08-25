@@ -217,23 +217,27 @@ export default function VoiceCallPage() {
       text,
       () => {
         setIsAiSpeaking(true);
-      },
-      () => {
-        setIsAiSpeaking(false);
+        // Enable immediate listening for barge-in
         if (nextStage !== 'submitted' && !isMuted) {
           startCitizenListening(nextStage, data);
         }
       },
       () => {
         setIsAiSpeaking(false);
-        if (nextStage !== 'submitted' && !isMuted) {
+        if (nextStage !== 'submitted' && !isMuted && !isUserListening) {
+          startCitizenListening(nextStage, data);
+        }
+      },
+      () => {
+        setIsAiSpeaking(false);
+        if (nextStage !== 'submitted' && !isMuted && !isUserListening) {
           startCitizenListening(nextStage, data);
         }
       },
     );
   };
 
-  // Listen for Citizen Speech
+  // Listen for Citizen Speech with Barge-In Support
   const startCitizenListening = (currentStage: string, currentData: Record<string, unknown>) => {
     if (isMuted || !isSpeechRecognitionSupported()) return;
 
@@ -242,6 +246,12 @@ export default function VoiceCallPage() {
 
     recognitionRef.current?.startListening(
       (text: string, isFinal: boolean) => {
+        // Immediate Barge-In: If AI is speaking and user speaks, stop AI speech immediately
+        if (text.trim().length > 0 && isAiSpeaking) {
+          stopSpeaking();
+          setIsAiSpeaking(false);
+        }
+
         setInterimText(text);
         if (isFinal && text.trim().length > 0) {
           setIsUserListening(false);

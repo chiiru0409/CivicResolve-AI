@@ -105,20 +105,26 @@ def _call_llm_voice_extract(user_message: str, current_stage: str, extracted_so_
     return None
 
 
+def _is_negative(text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    words = cleaned.split()
+    negative_words = {"no", "nope", "cancel", "stop", "dont", "don't", "wait", "not", "wrong", "change", "nahi", "never"}
+    if any(w in words for w in negative_words):
+        return True
+    return False
+
+
 def _is_affirmative(text: str) -> bool:
-    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    if _is_negative(text):
+        return False
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    words = cleaned.split()
     affirmative_words = {
         "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "submit", "please",
         "confirm", "go ahead", "do it", "proceed", "correct", "right", "fine",
-        "yes please", "yes submit", "please submit", "submit it", "ha", "haan"
+        "ha", "haan"
     }
-    return cleaned in affirmative_words or any(w in cleaned.split() for w in ["yes", "submit", "confirm", "proceed"])
-
-
-def _is_negative(text: str) -> bool:
-    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
-    negative_words = {"no", "nope", "cancel", "stop", "dont", "wait", "not now", "wrong", "change", "nahi"}
-    return cleaned in negative_words or any(w in cleaned.split() for w in ["no", "cancel", "stop"])
+    return any(w in words for w in affirmative_words) or ("submit" in words and "don't" not in text and "dont" not in text)
 
 
 def _save_complaint_to_db(
