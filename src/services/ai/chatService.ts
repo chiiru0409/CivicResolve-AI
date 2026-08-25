@@ -14,6 +14,7 @@ import type { Category, Complaint } from '../../types';
 import { classifyCivicIssue } from './classificationService';
 import { trackComplaint, getMineComplaints } from '../complaintService';
 import { calculateSlaDeadline } from './routingService';
+import { defaultOrchestrator } from './agentOrchestrator';
 
 export type InformationState = 'KNOWN' | 'INFERRED' | 'UNKNOWN' | 'UNVERIFIED';
 
@@ -222,7 +223,25 @@ export async function getIntelligentChatResponse(
     }
   }
 
-  // 2. Contextual Complaint Tracking Queries
+  // 2. Multi-Intent and Sequential Conversational Support Queries ("And the other one?")
+  if (
+    /and the other one|what about the other|second one|other complaint/i.test(lower) ||
+    (lower.includes('and') && /check|status/i.test(lower) && /report|pothole|garbage|leak|broken|overflow/i.test(lower))
+  ) {
+    const orchRes = await defaultOrchestrator.process(userMessage, authenticatedUserEmail);
+    if (orchRes) {
+      return {
+        message: orchRes.primaryMessage,
+        quickReplies: orchRes.quickReplies || ['Track my complaint', 'Report a new problem'],
+        suggestComplaint: orchRes.suggestComplaint || false,
+        analysisCard: orchRes.analysisCard,
+        complaintData: orchRes.complaintData,
+        slotState: { ..._slotState },
+      };
+    }
+  }
+
+  // 3. Contextual Complaint Tracking Queries
   const explicitId = extractComplaintId(userMessage);
 
   if (
@@ -274,23 +293,14 @@ export async function getIntelligentChatResponse(
       }
     }
 
-    // If authenticated, fetch the user's latest complaint
-    if (authenticatedUserEmail) {
-      const userComplaints = await getMineComplaints().catch(() => []);
-      if (userComplaints.length > 0) {
-        const latest = userComplaints[0];
-        const sla = calculateSlaDeadline(latest.submittedAt, latest.priority, latest.category);
-
-        return {
-          message: `You have **${userComplaints.length} active report(s)**. Your latest is **${latest.complaintNumber || latest.id}** (${latest.category}):\n\n` +
-            `• **Current Stage**: \`${latest.status}\`\n` +
-            `• **Assigned To**: ${latest.department}\n` +
-            `• **SLA Clock**: ${sla.formattedCountdown}\n\n` +
-            `Would you like to view details for this complaint or file a new one?`,
-          quickReplies: [`Track ${latest.complaintNumber || latest.id}`, 'Why is it taking time?', 'Report new issue'],
-          slotState: { ..._slotState },
-        };
-      }
+    // If authenticated or sequential lookup, use SupportAgent via defaultOrchestrator
+    const orchSupport = await defaultOrchestrator.process(userMessage, authenticatedUserEmail);
+    if (orchSupport && orchSupport.primaryMessage) {
+      return {
+        message: orchSupport.primaryMessage,
+        quickReplies: orchSupport.quickReplies || ['Track my complaint', 'Report new issue'],
+        slotState: { ..._slotState },
+      };
     }
 
     return {
@@ -299,6 +309,7 @@ export async function getIntelligentChatResponse(
       slotState: { ..._slotState },
     };
   }
+
 
   // 3. Greeting / How it works
   if (/^(hi|hello|hey|namaste|good morning|good evening)\b/i.test(lower) && _slotState.turnCount <= 1) {
