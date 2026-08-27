@@ -121,6 +121,37 @@ export default function CitizenDashboardPage() {
           </StaggerContainer>
         )}
 
+        {/* Proactive AI Citizen Operations Brief */}
+        {!loading && complaints.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-5 rounded-2xl bg-gradient-to-r from-white/[0.04] to-white/[0.02] border border-[#FFC400]/20 relative overflow-hidden"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-9 h-9 rounded-xl bg-[#FFC400]/10 border border-[#FFC400]/25 flex items-center justify-center flex-shrink-0 text-[#FFC400] mt-0.5">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-[#FFC400] font-bold uppercase tracking-wider">AI Operations Intelligence Brief</span>
+                  <span className="text-[10px] font-mono text-white/40 bg-white/5 px-2 py-0.5 rounded-full">Grounded Live Telemetry</span>
+                </div>
+                <p className="text-xs text-white/80 font-sans mt-1.5 leading-relaxed">
+                  {active > 0 ? (
+                    <>
+                      You have <strong className="text-white font-bold">{active} active civic report(s)</strong>. {high > 0 ? `${high} high-priority incident is prioritized in department emergency response queues. ` : ''}
+                      {recent[0] ? `Latest report (${recent[0].id} - ${recent[0].category}) is currently ${recent[0].status} with ${recent[0].department || 'Municipal Operations'}.` : ''}
+                    </>
+                  ) : (
+                    <>All previously filed complaints are currently resolved. Municipal resolution telemetry reports 100% resolution for your logged incidents.</>
+                  )}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Quick Actions Panel */}
         <StaggerContainer className="grid sm:grid-cols-3 gap-3">
           <StaggerItem>

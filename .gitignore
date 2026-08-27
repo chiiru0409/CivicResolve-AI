@@ -38,3 +38,4 @@ npm-debug.log*
 __pycache__/
 *.py[cod]
 scratch/
+.pytest_cache/
