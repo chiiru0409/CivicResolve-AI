@@ -11,9 +11,11 @@ import { calculateSlaDeadline } from '../services/ai/routingService';
 import PriorityBadge from '../components/PriorityBadge';
 import StatusBadge from '../components/StatusBadge';
 import ComplaintTimeline from '../components/ComplaintTimeline';
+import ComplaintLocationMap from '../components/ComplaintLocationMap';
 import PageTransition from '../components/PageTransition';
 import type { Complaint } from '../types';
 import { formatDate, getCategoryEmoji } from '../utils/helpers';
+import { validateCoordinates } from '../utils/mapConfig';
 import { useToast, ToastContainer } from '../components/Toast';
 import { buttonGestures, cardGestures } from '../utils/motion';
 
@@ -447,6 +449,17 @@ const TrackComplaintPage: React.FC = () => {
                   </div>
                 )}
               </motion.div>
+
+              {/* Incident Geolocation Map */}
+              {(() => {
+                const check = validateCoordinates(complaint.latitude, complaint.longitude);
+                if (!check.valid) return null;
+                return (
+                  <div className="rounded-2xl overflow-hidden shadow-2xl">
+                    <ComplaintLocationMap complaint={complaint} />
+                  </div>
+                );
+              })()}
 
               {/* Timeline */}
               <div className="bg-[#111] border border-white/8 rounded-2xl p-6 shadow-xl">

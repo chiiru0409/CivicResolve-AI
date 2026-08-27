@@ -7,6 +7,7 @@ import { Layers, Info, AlertTriangle, RefreshCw } from 'lucide-react';
 import PageTransition from '../../components/PageTransition';
 import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
 import { buttonGestures } from '../../utils/motion';
+import { validateCoordinates } from '../../utils/mapConfig';
 
 function buildMarkers(complaints: Complaint[]): MapMarker[] {
   return complaints.map((c) => ({
@@ -31,15 +32,19 @@ export default function AdminMapPage() {
   const resolved = complaints.filter((c) => ['Resolved','Closed'].includes(c.status)).length;
   const active   = complaints.filter((c) => !['Resolved','Closed'].includes(c.status)).length;
 
-  // Only complaints with stored coordinates will appear on the map
-  const withCoords    = complaints.filter((c) => c.latitude != null && c.longitude != null && (c.latitude !== 0 || c.longitude !== 0));
-  const missingCoords = complaints.length - withCoords.length;
+  // Only complaints with mathematically valid coordinates will appear on the map
+  const validCoordsList = complaints
+    .map((c) => ({ complaint: c, ...validateCoordinates(c.latitude, c.longitude) }))
+    .filter((item) => item.valid && item.latitude !== null && item.longitude !== null);
+
+  const withCoordsCount = validCoordsList.length;
+  const missingCoords = complaints.length - withCoordsCount;
 
   // Auto-compute centre from real complaint coordinates
   let mapCenter: [number, number] = [17.3850, 78.4867];
-  if (withCoords.length > 0) {
-    const avgLat = withCoords.reduce((s, c) => s + c.latitude!, 0) / withCoords.length;
-    const avgLng = withCoords.reduce((s, c) => s + c.longitude!, 0) / withCoords.length;
+  if (validCoordsList.length > 0) {
+    const avgLat = validCoordsList.reduce((s, c) => s + c.latitude!, 0) / validCoordsList.length;
+    const avgLng = validCoordsList.reduce((s, c) => s + c.longitude!, 0) / validCoordsList.length;
     mapCenter = [avgLat, avgLng];
   }
 
@@ -90,7 +95,7 @@ export default function AdminMapPage() {
           { color: 'bg-[#E10600]', text: 'text-[#E10600]', border: 'border-[#E10600]/20', label: `${high} High Priority`,  pulse: false },
           { color: 'bg-[#FFC400]', text: 'text-[#FFC400]', border: 'border-[#FFC400]/20', label: `${active} Active`,        pulse: true  },
           { color: 'bg-[#22C55E]', text: 'text-[#22C55E]', border: 'border-[#22C55E]/20', label: `${resolved} Resolved`,    pulse: false },
-          { color: 'bg-blue-400',  text: 'text-blue-400',  border: 'border-blue-400/20',  label: `${withCoords.length} Mapped`, pulse: false },
+          { color: 'bg-blue-400',  text: 'text-blue-400',  border: 'border-blue-400/20',  label: `${withCoordsCount} Mapped`, pulse: false },
         ].map((s) => (
           <StaggerItem key={s.label}
             className={`flex items-center gap-2 bg-white/5 border ${s.border} rounded-xl px-4 py-2`}>
@@ -125,7 +130,7 @@ export default function AdminMapPage() {
           markers={markers}
           complaints={complaints}
           center={mapCenter}
-          zoom={withCoords.length > 0 ? 13 : 12}
+          zoom={withCoordsCount > 0 ? 13 : 12}
           height="100%"
         />
       </div>

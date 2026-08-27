@@ -14,6 +14,7 @@ import { mapApiComplaint, adminGetComplaint } from '../../services/complaintServ
 import type { Complaint, ComplaintStatus } from '../../types';
 import { useToast, ToastContainer } from '../../components/Toast';
 import { formatDateTime, getCategoryEmoji } from '../../utils/helpers';
+import { validateCoordinates, formatCoordinatesDMS } from '../../utils/mapConfig';
 import SkeletonCard from '../../components/SkeletonCard';
 import PageTransition from '../../components/PageTransition';
 import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
@@ -288,17 +289,21 @@ export default function AdminComplaintDetailPage() {
               </div>
             </div>
           </div>
-          {complaint.latitude && (
-            <div className="hidden sm:block text-right">
-              <span className="telemetry-chip-green">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
-                GEO LOCATED
-              </span>
-              <p className="text-[11px] font-mono text-white/40 mt-1">
-                {complaint.latitude.toFixed(4)}°N, {complaint.longitude?.toFixed(4)}°E
-              </p>
-            </div>
-          )}
+          {(() => {
+            const check = validateCoordinates(complaint.latitude, complaint.longitude);
+            if (!check.valid || check.latitude === null || check.longitude === null) return null;
+            return (
+              <div className="hidden sm:block text-right">
+                <span className="telemetry-chip-green">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
+                  GPS VERIFIED
+                </span>
+                <p className="text-[11px] font-mono text-white/40 mt-1">
+                  {formatCoordinatesDMS(check.latitude, check.longitude, 4)}
+                </p>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -566,11 +571,15 @@ export default function AdminComplaintDetailPage() {
               {complaint.landmark && (
                 <p className="text-xs text-white/50 pl-6">Landmark: {complaint.landmark}</p>
               )}
-              {complaint.latitude && (
-                <div className="text-xs font-mono text-white/40 pl-6">
-                  GPS Coordinates: {complaint.latitude.toFixed(6)}, {complaint.longitude?.toFixed(6)}
-                </div>
-              )}
+              {(() => {
+                const check = validateCoordinates(complaint.latitude, complaint.longitude);
+                if (!check.valid || check.latitude === null || check.longitude === null) return null;
+                return (
+                  <div className="text-xs font-mono text-white/50 pl-6 flex items-center gap-1.5">
+                    <span className="text-[#22C55E]">●</span> GPS Coordinates: {formatCoordinatesDMS(check.latitude, check.longitude, 6)} ({check.latitude.toFixed(6)}, {check.longitude.toFixed(6)})
+                  </div>
+                );
+              })()}
               <div className="flex items-start gap-2">
                 <Building2 className="w-4 h-4 text-[#FFC400] mt-0.5 flex-shrink-0" />
                 <span className="text-white/80">{complaint.department}</span>
