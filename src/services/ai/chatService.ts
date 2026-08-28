@@ -311,11 +311,44 @@ export async function getIntelligentChatResponse(
   }
 
 
-  // 3. Greeting / How it works
-  if (/^(hi|hello|hey|namaste|good morning|good evening)\b/i.test(lower) && _slotState.turnCount <= 1) {
+  // 3. Greeting / Small Talk / Capabilities Guard (Always pure greeting safe)
+  const isPureGreeting = /^(hi|hello|hey|helo|hai|howdy|namaste|vanakkam|pranam|good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|are\s+you\s+there|what\s+can\s+you\s+do|how\s+does\s+this\s+work|who\s+are\s+you|what\s+is\s+your\s+name|i\s+need\s+some\s+help|what\s+do\s+you\s+do)\b/i.test(lower) &&
+    !/pothole|garbage|trash|waste|drain|drainage|leak|leaking|water|light|streetlight|wire|pavement|broken|sinkhole|flood|burst|collapsed/i.test(lower);
+
+  if (isPureGreeting) {
+    let greetingText = "Hello! 👋 I'm **CivicResolve AI**, your intelligent municipal assistant.\n\nI can help you report civic issues like potholes, garbage, water problems, streetlights, drainage, or track an existing complaint.\n\nWhat would you like help with today?";
+    if (/how are you|how're you/i.test(lower)) {
+      greetingText = "Hello! 👋 I'm doing well, thank you! I'm here to help with civic services and municipal complaints across your city.\n\nWhat can I assist you with today?";
+    } else if (/what can you do|how does this work|what do you do/i.test(lower)) {
+      greetingText = "I can help you with:\n\n• **Report civic issues**: Road damage, garbage, water leaks, streetlights, drainage\n• **Track complaints**: Live status and SLA countdown for any ticket (e.g. `CR-2026-XXXXXX`)\n• **Direct municipal routing**: Automated routing to the responsible municipal team\n\nWhat would you like help with?";
+    }
     return {
-      message: `Hello! 👋 I am **Civic AI**, your autonomous municipal assistant.\n\nDescribe any issue in your neighborhood (e.g., *"Large pothole near college"*, *"Drainage overflow on 100ft road"*, *"Broken streetlight"*), and I'll classify and file it for you.`,
-      quickReplies: ['Report a pothole', 'Drainage overflow', 'Garbage not collected', 'Check my complaint'],
+      message: greetingText,
+      quickReplies: ['Report a pothole', 'Garbage not collected', 'Water leakage', 'Track my complaint'],
+      suggestComplaint: false,
+      slotState: { ..._slotState },
+    };
+  }
+
+  // Partial / broad complaints without specifics
+  if (lower === 'water' || lower === "it's about water" || lower === 'water problem' || lower === 'water issue' || lower === "there's something wrong with the water" || lower === "something is wrong with the water") {
+    _slotState.issue = 'Water issue';
+    _slotState.category = 'Water';
+    return {
+      message: "Sure, I can help with that. Is it a **water supply outage**, **pipeline leakage**, **dirty / contaminated water**, or **low pressure**?",
+      quickReplies: ['Pipeline leakage', 'Contaminated water', 'No water supply', 'Low pressure'],
+      suggestComplaint: false,
+      slotState: { ..._slotState },
+    };
+  }
+
+  if (lower === 'road' || lower === "it's about road" || lower === 'road problem' || lower === 'roads' || lower === 'pothole' || lower === "there's a problem with the road") {
+    _slotState.issue = 'Road issue';
+    _slotState.category = 'Roads';
+    return {
+      message: "Sure, I can help with road issues. Is it a **dangerous pothole**, **broken footpath**, **road surface damage**, or **missing divider**?",
+      quickReplies: ['Dangerous pothole', 'Broken footpath', 'Road surface damage'],
+      suggestComplaint: false,
       slotState: { ..._slotState },
     };
   }
@@ -334,7 +367,7 @@ export async function getIntelligentChatResponse(
       });
 
       return {
-        message: `Got it (**${_slotState.location}**). Is it on the main road, near the main entrance, or in a specific wing? Either way, I've prepared your ticket draft below:`,
+        message: `Got it (**${_slotState.location}**). Is it on the main road, near the main entrance, or inside the area? Either way, I've prepared your ticket draft below:`,
         suggestComplaint: true,
         quickReplies: ['On the main road', 'Near the entrance', 'Confirm & Submit'],
         analysisCard: {
@@ -396,8 +429,8 @@ export async function getIntelligentChatResponse(
     _slotState.issue = trimmed;
     _slotState.confirmationState = 'clarifying';
     return {
-      message: `Where is the issue located? A street, landmark, neighborhood, or nearby place is enough.`,
-      quickReplies: ['Near Government Hospital', 'Near Railway Station', 'Main Market Road', 'Outside my house'],
+      message: `I'm sorry about that. Where is the issue located? A street, landmark, neighborhood, or nearby place is enough.`,
+      quickReplies: ['Near Gandhi Market', 'Near Railway Station', 'Main Market Road', 'Outside City Mall'],
       slotState: { ..._slotState },
     };
   }
@@ -410,7 +443,7 @@ export async function getIntelligentChatResponse(
     _slotState.authority = classification.department;
 
     // Check if location was included in the user's message
-    const locMatches = trimmed.match(/(?:near|at|on|opposite|beside|behind|in)\s+([A-Za-z0-9\s,-]+)/i);
+    const locMatches = trimmed.match(/(?:near|at|on|opposite|beside|behind|in|outside)\s+([A-Za-z0-9\s,-]+)/i);
     if (locMatches && locMatches[1].trim().length > 3) {
       _slotState.location = locMatches[1].trim();
       _slotState.confirmationState = 'awaiting_confirmation';
@@ -441,8 +474,8 @@ export async function getIntelligentChatResponse(
 
     _slotState.confirmationState = 'clarifying';
     return {
-      message: `I've categorized this as **${classification.category}** (Severity: \`${classification.priority}\`).\n\n**Where exactly is this occurring?** Please share a street name, landmark, or area (e.g. *"Near Indiranagar Metro Pillar 42"*).`,
-      quickReplies: ['Near my current location', 'Main Market Road', 'Residential Sector 4', 'Near Bus Stand'],
+      message: `I've noted this as **${classification.category}** (Severity: \`${classification.priority}\`).\n\n**Where is this located?** Please share a street name, landmark, or area (e.g. *"Near Gandhi Market"*).`,
+      quickReplies: ['Near Gandhi Market', 'Main Market Road', 'Residential Sector 4', 'Near Bus Stand'],
       slotState: { ..._slotState },
     };
   }

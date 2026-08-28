@@ -435,12 +435,16 @@ class ComplaintRatingResponse(BaseModel):
 # ══════════════════════════════════════════════════════════════
 
 class VoiceTurnRequest(BaseModel):
-    message: str = Field(..., max_length=2000)
+    message: Optional[str] = Field(None, max_length=2000)
+    user_speech: Optional[str] = Field(None, max_length=2000)
     history: list[ChatMessageItem] = Field(default_factory=list)
-    stage: str = Field("greeting", description="Current stage: greeting, problem, location, landmark, confirm, submitted")
+    stage: str = Field("greeting", description="Current stage: greeting, listening, problem, location, landmark, confirm, submitted, tracking")
     extracted_data: dict[str, Any] = Field(default_factory=dict)
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+
+    def get_user_text(self) -> str:
+        return (self.message or self.user_speech or "").strip()
 
 
 class VoiceTurnResponse(BaseModel):
@@ -449,6 +453,7 @@ class VoiceTurnResponse(BaseModel):
     extracted_data: dict[str, Any]
     action: str = Field("speak", description="'speak', 'listen', 'confirm', 'completed', 'ended'")
     complaint: Optional[dict] = None
+    ui_hints: Optional[dict[str, Any]] = None
 
 
 class ImageAnalysisRequest(BaseModel):

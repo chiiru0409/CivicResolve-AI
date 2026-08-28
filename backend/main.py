@@ -1667,10 +1667,12 @@ def handle_chat(
     Intelligent chatbot endpoint for civic complaints.
     Provides natural language understanding, multi-turn conversational intake,
     contextual complaint tracking, and grounded SLA analysis.
+    NEVER interprets greetings as complaints or suggests premature complaint registration.
     """
     import re
     from classifier import classify, get_department_for_category, CATEGORY_KEYWORDS
     from priority import detect_priority, calculate_severity, get_estimated_response
+    from voice_agent import _is_pure_greeting, _is_general_inquiry, _is_off_topic, EMERGENCY_KEYWORDS
 
     user_msg = body.message.strip()
     lower = user_msg.lower()
@@ -1687,7 +1689,64 @@ def handle_chat(
         except Exception:
             pass
 
-    # 1. Contextual Complaint Tracking & Status Lookups
+    # 1. Pure Greeting & Small Talk Guard (ZERO premature complaints)
+    if _is_pure_greeting(user_msg):
+        if any(h in lower for h in ["how are you", "how're you", "how do you do"]):
+            msg = (
+                "Hello! 👋 I'm doing well, thank you. I'm **CivicResolve AI**, your municipal operations assistant.\n\n"
+                "I can help you report civic issues like road potholes, overflowing garbage, drainage problems, "
+                "water pipe leaks, or broken streetlights, or track an existing complaint.\n\n"
+                "What can I help you with today?"
+            )
+        elif any(h in lower for h in ["what can you do", "help me", "can you help", "what do you do"]):
+            msg = (
+                "Hello! 👋 I'm **CivicResolve AI**. I can help you with:\n\n"
+                "• **Reporting issues**: Potholes, garbage, water leaks, streetlights, drainage\n"
+                "• **Real-time Tracking**: Check status and SLA countdown for any ticket ID (e.g. `CR-2026-XXXXXX`)\n"
+                "• **Department Routing**: Direct routing to Public Works, Sanitation, Water Board, etc.\n\n"
+                "What would you like help with today?"
+            )
+        else:
+            msg = (
+                "Hello! 👋 I'm **CivicResolve AI**. I can help you report civic issues like potholes, garbage, "
+                "water problems, streetlights, drainage, or other public-service issues. You can also ask me to track an existing complaint.\n\n"
+                "What would you like help with today?"
+            )
+        return ChatResponse(
+            message=msg,
+            suggest_complaint=False,
+            quick_replies=["Report a pothole", "Garbage not collected", "Water leakage", "Track my complaint"],
+        )
+
+    # 2. General Inquiry & Off-Topic Guard
+    if _is_general_inquiry(user_msg):
+        return ChatResponse(
+            message=(
+                "**CivicResolve AI** is your city's 24/7 intelligent municipal operations platform.\n\n"
+                "**How it works:**\n"
+                "1. **Describe the issue** — Tell me what happened and where (e.g., *'Pothole on MG Road near City Mall'*).\n"
+                "2. **AI Analysis** — I classify the category, evaluate priority, and route to the correct municipal team.\n"
+                "3. **Track & Resolve** — Receive an official ID like `CR-2026-XXXXXX` to follow live progress.\n\n"
+                "What civic problem would you like to report today?"
+            ),
+            suggest_complaint=False,
+            quick_replies=["Report a problem", "Track a complaint", "List departments"],
+        )
+
+    if _is_off_topic(user_msg):
+        if "weather" in lower:
+            msg = "I can help with civic services and municipal complaints, but I don't currently have live weather telemetry. If you'd like, I can help you report or track a civic issue in your area."
+        elif "name" in lower or "who are you" in lower:
+            msg = "I'm **CivicResolve AI**, your intelligent civic assistant. What civic service or complaint can I help you with?"
+        else:
+            msg = "I'm specialized in helping citizens report and track municipal civic issues. Would you like to report a problem or check an existing complaint?"
+        return ChatResponse(
+            message=msg,
+            suggest_complaint=False,
+            quick_replies=["Report an issue", "Track a complaint"],
+        )
+
+    # 3. Contextual Complaint Tracking & Status Lookups
     id_match = re.search(r"CR-\d{4}-\d{4,8}", user_msg, re.IGNORECASE)
     is_track_intent = (
         bool(id_match)
@@ -1695,7 +1754,8 @@ def handle_chat(
             "where is my complaint", "status of", "check my complaint", "track complaint",
             "track my complaint", "why is my complaint", "why hasn't it been resolved",
             "why hasnt it been resolved", "when was it assigned", "which department is handling",
-            "what should i do if the issue is still there", "issue is still there", "remind"
+            "what should i do if the issue is still there", "issue is still there", "remind",
+            "has my complaint been resolved", "whats the status", "what's the status"
         ])
     )
 
@@ -1764,14 +1824,14 @@ def handle_chat(
                 )
             elif id_match:
                 return ChatResponse(
-                    message=f"I checked the municipal database, but could not find Complaint ID **{id_match.group(0).upper()}**. Please check the ID format (e.g. `CR-2026-004821`).",
+                    message=f"I checked the municipal database, but could not find Complaint ID **{id_match.group(0).upper()}**. Please verify the ID format (e.g. `CR-2026-004821`).",
                     quick_replies=["Track a complaint", "Report a problem"],
                     suggest_complaint=False,
                 )
         finally:
             conn.close()
 
-    # 2. Extract classification keywords and domain info
+    # 4. Extract classification keywords and domain info
     has_civic_keywords = any(kw in lower for kws in CATEGORY_KEYWORDS.values() for kw in kws)
     category = classify(user_msg)
     priority = detect_priority(user_msg)
@@ -1779,7 +1839,22 @@ def handle_chat(
     _, dept_name = get_department_for_category(category)
     est_sla = get_estimated_response(priority)
 
-    # 3. Call local LLM (Ollama) if available
+    # Partial / broad complaints without specifics
+    if lower in ["it's about water", "water", "water problem", "water issue", "there's something wrong with the water", "something is wrong with the water"]:
+        return ChatResponse(
+            message="Sure, I can help with water issues. Is it a **water supply outage**, **pipeline leakage**, **contaminated / dirty water**, or **low pressure**?",
+            quick_replies=["Water leakage", "Dirty water", "No water supply", "Low pressure"],
+            suggest_complaint=False,
+        )
+
+    if lower in ["it's about road", "road problem", "road", "roads", "pothole problem", "there's a problem with the road"]:
+        return ChatResponse(
+            message="Sure, I can help with road issues. Is it a **dangerous pothole**, **broken footpath**, **road surface damage**, or **missing divider**?",
+            quick_replies=["Dangerous pothole", "Broken footpath", "Road surface damage"],
+            suggest_complaint=False,
+        )
+
+    # 5. Call local LLM (Ollama) if available
     llm_resp = None
     try:
         from llm import chat_with_llm
@@ -1820,19 +1895,7 @@ def handle_chat(
             complaint_data=complaint_data,
         )
 
-    # 4. Fallback Rule-Based Civic Engine
-    if re.search(r"^(hi|hello|hey|good morning|good evening|namaste|hai|helo)\b", lower):
-        return ChatResponse(
-            message="Hi there! 👋 I'm **Civic AI**, your intelligent assistant for municipal complaints.\n\nI can help you report an issue, identify the right department, or track an existing complaint.\n\nWhat would you like to do?",
-            quick_replies=["Report a problem", "Track my complaint", "How does this work?", "Common issues"],
-        )
-
-    if "how does this work" in lower or "how it works" in lower or "help" in lower or "what can you do" in lower:
-        return ChatResponse(
-            message="Here is how **CivicResolve AI** works:\n\n**1. Report** — Describe your civic issue + optional photo proof + location.\n**2. AI Analyzes** — Automatically classifies category, priority, and routes to the right department.\n**3. Track** — Get a unique ID like `CR-2026-XXXXXX` to follow progress in real time.\n**4. Resolve** — Municipal team resolves the issue and updates the timeline.\n\nWhat would you like to do?",
-            quick_replies=["Report a problem", "Track my complaint", "What issues can I report?"],
-        )
-
+    # 6. Fallback Rule-Based Civic Engine
     if "which department" in lower or "who handles" in lower:
         hist_text = " ".join(h.content for h in body.history) + " " + user_msg
         cat = classify(hist_text)
@@ -1843,24 +1906,28 @@ def handle_chat(
             suggest_complaint=True,
         )
 
-    if has_civic_keywords or category != "Other":
+    if has_civic_keywords and category != "Other":
         # Check if location was mentioned in the user message or conversation history
         combined_text = " ".join(h.content for h in body.history) + " " + user_msg
-        loc_words = ["road", "street", "near", "opposite", "beside", "behind", "layout", "colony", "nagar", "ward", "cross", "main", "junction", "sector"]
+        loc_words = ["road", "street", "near", "opposite", "beside", "behind", "layout", "colony", "nagar", "ward", "cross", "main", "junction", "sector", "mall", "market", "station"]
         has_location = any(w in combined_text.lower() for w in loc_words)
 
         if not has_location and len(body.history) < 2:
             return ChatResponse(
-                message=f"I understand this is a **{category}** issue. I can help report this.\n\n**Where exactly is this occurring?** (e.g. street name, landmark, or area).",
-                quick_replies=["Near my apartment", "On the main road", "Near the bus stop"],
+                message=f"I understand this is a **{category}** issue. Where exactly is this occurring? (e.g. street name, landmark, or area).",
+                quick_replies=["Near Gandhi Market", "On Main Road", "Near the bus stop"],
                 suggest_complaint=False,
             )
+
+        emerg_note = ""
+        if any(ek in user_msg.lower() for ek in EMERGENCY_KEYWORDS):
+            emerg_note = "\n\n⚠️ **Urgent Safety Warning**: For immediate life-safety hazards, please also notify emergency services at 112."
 
         card = {
             "category": category,
             "priority": priority,
             "department": dept_name,
-            "confidence": 92,
+            "confidence": 94,
             "severity": severity,
             "estimatedResponse": est_sla,
         }
@@ -1874,7 +1941,7 @@ def handle_chat(
         }
 
         return ChatResponse(
-            message=f"✅ **AI Classification Complete**\n\nIdentified **{category}** issue routed to **{dept_name}** with **{priority}** priority (SLA target: {est_sla}).\n\nClick **File Complaint** below to register your ticket immediately.",
+            message=f"✅ **AI Classification Prepared**\n\nIdentified **{category}** issue routed to **{dept_name}** with **{priority}** priority (SLA target: {est_sla}).{emerg_note}\n\nClick **File Complaint** below to review and confirm submission.",
             suggest_complaint=True,
             quick_replies=["File Complaint", "Track my complaint", "Report another issue"],
             analysis_card=card,
@@ -2016,15 +2083,16 @@ def analyze_image_endpoint(body: ImageAnalysisRequest):
 
 
 @router.post("/voice/turn", response_model=VoiceTurnResponse)
+@router.post("/ai/voice-turn", response_model=VoiceTurnResponse)
 def handle_voice_turn(
     body: VoiceTurnRequest,
     authorization: Optional[str] = Header(None),
 ):
     """
     Dedicated AI Voice/Call Helpline turn processor.
-    Takes citizen voice transcript, tracks conversation state (Problem -> Location -> Landmark -> Confirm),
-    uses Qwen2.5:3B / Ollama with rule-based fallback, saves the real complaint to DB on confirmation,
-    and returns text-to-speech spoken response + real Complaint ID.
+    Takes citizen voice transcript, tracks multi-turn conversation state,
+    uses Qwen2.5:3B / Ollama with deterministic fallback, saves the real complaint to DB on confirmation,
+    and returns text-to-speech spoken response + real Complaint ID + ui_hints.
     """
     citizen_id = None
     if authorization and authorization.startswith("Bearer "):
@@ -2038,13 +2106,17 @@ def handle_voice_turn(
         except Exception:
             pass  # anonymous or expired token — proceed safely
 
+    user_text = body.get_user_text()
+    history_list = [h.model_dump() for h in body.history] if body.history else []
+
     result = process_voice_call_turn(
-        message=body.message,
+        message=user_text,
         stage=body.stage,
         extracted_data=body.extracted_data,
         citizen_id=citizen_id,
         latitude=body.latitude,
         longitude=body.longitude,
+        history=history_list,
     )
     return VoiceTurnResponse(**result)
 

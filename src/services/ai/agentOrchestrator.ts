@@ -341,6 +341,19 @@ export class AgentOrchestrator {
       };
     }
 
+    // ── Check Pure Greeting & General Inquiries (Zero Premature Complaints) ──
+    const isGreeting = /^(hi|hello|hey|helo|hai|namaste|vanakkam|pranam|good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|are\s+you\s+there|what\s+can\s+you\s+do|how\s+does\s+this\s+work|who\s+are\s+you|what\s+is\s+your\s+name|i\s+need\s+some\s+help|what\s+do\s+you\s+do)\b/i.test(lower) &&
+      !/pothole|garbage|trash|waste|drain|drainage|leak|leaking|water|light|streetlight|wire|pavement|broken|sinkhole|flood|burst|collapsed/i.test(lower);
+
+    if (isGreeting) {
+      return {
+        primaryMessage: "Hello! 👋 I'm **CivicResolve AI**, your intelligent municipal assistant.\n\nI can help you report civic issues like potholes, garbage, water problems, streetlights, drainage, or track an existing complaint.\n\nWhat would you like help with today?",
+        activeAgent: 'conversation_agent',
+        suggestComplaint: false,
+        quickReplies: ['Report a pothole', 'Garbage not collected', 'Water leakage', 'Track my complaint'],
+      };
+    }
+
     // ── Multi-Intent Parser: Check for Status Lookup + New Report in one prompt ──
     const hasStatusIntent = /check my|status of|where is my|what happened to my/i.test(lower);
     const hasNewReportIntent = /report|also report|pothole|garbage|leak|broken|overflow/i.test(lower);

@@ -45,7 +45,7 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "Infrastructure": [
         "bridge", "sidewalk", "bench", "park", "building", "wall",
         "structure", "crack", "collapse", "broken", "damaged", "facility",
-        "public property", "fence", "compound", "footbridge", "bus stop",
+        "public property", "fence", "compound", "footbridge", "broken bus stop",
         "bus shelter", "public toilet", "railing", "damaged public infrastructure",
     ],
 }
@@ -74,7 +74,11 @@ def classify(text: str) -> str:
         return "Other"
 
     # Specific civic root-cause rules:
-    # "There is water covering the road because the drain is blocked" -> Drainage root issue
+    # 1. Potholes are always Roads even if adjacent to bus stops, malls, or structures
+    if "pothole" in lower or "pot hole" in lower or "crater on road" in lower or "bad road" in lower:
+        return "Roads"
+
+    # 2. "There is water covering the road because the drain is blocked" -> Drainage root issue
     if "drain" in lower and ("blocked" in lower or "overflow" in lower or "water" in lower or "rain" in lower):
         return "Drainage"
 

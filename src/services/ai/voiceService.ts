@@ -1,8 +1,9 @@
 /**
- * voiceService.ts — Voice AI Agent & Speech Pipeline
+ * voiceService.ts — Voice AI Agent & Speech Pipeline for CivicResolve AI
  *
  * Implements real microphone permissions, Web Speech Recognition, Speech Synthesis,
- * turn-by-turn conversational complaint intake, and voice status lookups.
+ * multi-turn conversational intake with natural intent understanding, slot tracking,
+ * summary read-back confirmation, and voice status tracking.
  */
 
 import { api, isBackendAvailable } from '../api';
@@ -11,7 +12,7 @@ import { trackComplaint, submitComplaint } from '../complaintService';
 
 export interface VoiceTurnResponse {
   reply_text: string;
-  stage: 'greeting' | 'problem' | 'location' | 'landmark' | 'confirm' | 'submitted' | 'tracking';
+  stage: 'greeting' | 'listening' | 'problem' | 'location' | 'landmark' | 'confirm' | 'submitted' | 'tracking' | 'cancelled';
   extracted_data: {
     description?: string;
     location?: string;
@@ -19,6 +20,8 @@ export interface VoiceTurnResponse {
     category?: string;
     priority?: string;
     department?: string;
+    duration?: string;
+    evidence_mentioned?: boolean;
   };
   action: 'speak' | 'listen' | 'confirm' | 'completed' | 'ended';
   complaint?: {
@@ -33,6 +36,12 @@ export interface VoiceTurnResponse {
     status: string;
     created_at: string;
   } | null;
+  ui_hints?: {
+    status_label?: string;
+    can_confirm?: boolean;
+    can_cancel?: boolean;
+    suggested_quick_replies?: string[];
+  };
 }
 
 interface IWindow extends Window {
@@ -163,7 +172,11 @@ export function speakText(
 
   window.speechSynthesis.cancel();
 
-  const cleanText = text.replace(/[*_`#]/g, '').replace(/CR-\d{4}-\d+/gi, (m) => m.split('').join(' '));
+  // Strip Markdown symbols and spell out Complaint IDs cleanly for TTS
+  const cleanText = text
+    .replace(/[*_`#]/g, '')
+    .replace(/CR-(\d{4})-(\d+)/gi, (_, year, num) => `C R dash ${year} dash ${num.split('').join(' ')}`);
+
   const utterance = new SpeechSynthesisUtterance(cleanText);
   utterance.rate = 1.0;
   utterance.pitch = 1.0;
@@ -191,130 +204,306 @@ export function stopSpeaking(): void {
   }
 }
 
+// ── Helpers for local fallback state machine ──────────────────────────────────
+
+function isGreetingSpeech(text: string): boolean {
+  const cleaned = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const greetings = [
+    'hi', 'hello', 'hey', 'namaste', 'good morning', 'good evening', 'good afternoon',
+    'how are you', 'can you help me', 'what can you do', 'who are you', 'are you there',
+  ];
+  return greetings.includes(cleaned) || (cleaned.startsWith('hello') && cleaned.split(' ').length <= 3);
+}
+
+function isAffirmativeSpeech(text: string): boolean {
+  const cleaned = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const affirmatives = [
+    'yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'submit', 'confirm', 'proceed',
+    'correct', 'right', 'fine', 'haan', 'ha', 'do it', 'go ahead', 'yes please', 'submit it',
+  ];
+  return affirmatives.some((a) => cleaned === a || cleaned.startsWith(a));
+}
+
+function isCancelSpeech(text: string): boolean {
+  const cleaned = text.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const cancels = ['cancel', 'dont submit', 'stop', 'nevermind', 'changed my mind', 'abort', 'exit', 'no'];
+  return cancels.some((c) => cleaned === c || cleaned.startsWith(c));
+}
+
+function extractLocationSpeech(text: string): string | null {
+  const lower = text.toLowerCase();
+  const preps = ['near', 'opposite', 'beside', 'behind', 'at', 'on'];
+  for (const prep of preps) {
+    const match = lower.match(new RegExp(`\\b${prep}\\s+([a-z0-9\\s]{3,35})`, 'i'));
+    if (match && match[1]) {
+      const loc = match[1].split(/\b(and|for|since|is|because)\b/)[0].trim();
+      if (loc.length >= 3) {
+        return `${prep.charAt(0).toUpperCase() + prep.slice(1)} ${loc.charAt(0).toUpperCase() + loc.slice(1)}`;
+      }
+    }
+  }
+  if (lower.includes('road') || lower.includes('street') || lower.includes('market') || lower.includes('colony') || lower.includes('nagar')) {
+    return text.trim();
+  }
+  return null;
+}
+
 /** Process a conversational voice turn */
 export async function sendVoiceTurn(
   userSpeech: string,
   currentStage: string,
   extractedData: Record<string, unknown>,
   coords?: { latitude?: number; longitude?: number },
+  history?: Array<{ role: string; content: string }>,
 ): Promise<VoiceTurnResponse> {
   // 1. Try real backend endpoint if online
   if (isBackendAvailable()) {
     try {
-      const res = await api.post<VoiceTurnResponse>('/ai/voice-turn', {
+      const res = await api.post<VoiceTurnResponse>('/voice/turn', {
+        message: userSpeech,
         user_speech: userSpeech,
         stage: currentStage,
         extracted_data: extractedData,
         latitude: coords?.latitude,
         longitude: coords?.longitude,
+        history: history || [],
       });
       if (res && res.reply_text) return res;
     } catch {
-      // Fall through to local voice turn engine
+      // Fall through to local intelligent state machine
     }
   }
 
-  // 2. Intelligent local turn-by-turn voice dialog state machine
+  // 2. Intelligent local turn-by-turn fallback dialog state machine
   const speech = userSpeech.trim();
   const lower = speech.toLowerCase();
 
-  // Voice tracking check
+  // Initial Start
+  if (currentStage === 'greeting' || speech === '__START__') {
+    return {
+      reply_text:
+        'Hello! Welcome to CivicResolve AI Municipal Helpline. I can help you report and track public infrastructure issues like potholes, garbage, drainage blockages, water supply leaks, broken streetlights, or damaged facilities. How can I help you today?',
+      stage: 'listening',
+      extracted_data: {},
+      action: 'speak',
+      ui_hints: {
+        status_label: 'GREETING',
+        can_confirm: false,
+        can_cancel: false,
+        suggested_quick_replies: ['Report a pothole', 'Garbage uncollected', 'Water leakage', 'Track complaint'],
+      },
+    };
+  }
+
+  // Pure Greeting (MUST NOT create a complaint)
+  if (isGreetingSpeech(speech) && currentStage !== 'confirm') {
+    return {
+      reply_text:
+        "I'm here and ready to help! If you would like to report a civic issue in your area, please describe what problem you are observing and where it is located.",
+      stage: 'listening',
+      extracted_data: extractedData,
+      action: 'speak',
+      ui_hints: {
+        status_label: 'LISTENING',
+        can_confirm: false,
+        can_cancel: false,
+        suggested_quick_replies: ['Report an issue', 'Track complaint status'],
+      },
+    };
+  }
+
+  // Tracking query check
   const idMatch = speech.match(/CR-\d{4}-\d{4,8}/i);
-  if (idMatch || lower.includes('track') || lower.includes('status')) {
+  if (idMatch || lower.includes('track') || lower.includes('status of complaint')) {
     if (idMatch) {
       const record = await trackComplaint(idMatch[0].toUpperCase()).catch(() => null);
       if (record) {
         return {
-          reply_text: `Complaint ${idMatch[0].toUpperCase()} is currently ${record.status}, assigned to ${record.department}.`,
+          reply_text: `I found Complaint ID ${idMatch[0].toUpperCase()}. This ${record.category} report is currently in ${record.status} status, handled by ${record.department}. Would you like to report another issue or track another ticket?`,
           stage: 'tracking',
           extracted_data: extractedData,
           action: 'speak',
+          complaint: {
+            id: record.complaintNumber || idMatch[0].toUpperCase(),
+            complaint_number: record.complaintNumber || idMatch[0].toUpperCase(),
+            title: record.title,
+            description: record.description || 'Tracked complaint',
+            category: record.category,
+            priority: record.priority,
+            department: record.department || 'Municipal Department',
+            location: record.location || 'Reported area',
+            status: record.status,
+            created_at: record.submittedAt || new Date().toISOString(),
+          },
+          ui_hints: {
+            status_label: 'TRACKING',
+            can_confirm: false,
+            can_cancel: false,
+            suggested_quick_replies: ['Report another issue', 'End Call'],
+          },
         };
       }
     }
-  }
-
-  if (currentStage === 'greeting') {
     return {
-      reply_text: "Welcome to CivicResolve AI Voice Helpline. What civic issue would you like to report today?",
-      stage: 'problem',
-      extracted_data: {},
-      action: 'listen',
-    };
-  }
-
-  if (currentStage === 'problem') {
-    const classification = classifyCivicIssue({ description: speech });
-    return {
-      reply_text: `I understand. I have noted a ${classification.category} issue. Where is this located? Please tell me the street or landmark.`,
-      stage: 'location',
-      extracted_data: {
-        description: speech,
-        category: classification.category,
-        priority: classification.priority,
-        department: classification.department,
+      reply_text: 'Please provide your CivicResolve Complaint ID, for example, CR-2026-123456.',
+      stage: 'tracking',
+      extracted_data: extractedData,
+      action: 'speak',
+      ui_hints: {
+        status_label: 'TRACKING',
+        can_confirm: false,
+        can_cancel: false,
+        suggested_quick_replies: ['Report a problem instead'],
       },
-      action: 'listen',
     };
   }
 
-  if (currentStage === 'location') {
-    const updated: Record<string, any> = { ...extractedData, location: speech };
+  // User Cancellation
+  if (isCancelSpeech(speech) && currentStage !== 'confirm') {
     return {
-      reply_text: `Got it, at ${speech}. I am ready to submit your ${updated.category || 'civic'} report. Say 'Confirm' to submit or tell me any additional details.`,
-      stage: 'confirm',
-      extracted_data: updated,
-      action: 'listen',
+      reply_text: 'No problem. I have cancelled this report and nothing was submitted. Is there anything else I can help you with?',
+      stage: 'listening',
+      extracted_data: {},
+      action: 'speak',
+      ui_hints: {
+        status_label: 'CANCELLED',
+        can_confirm: false,
+        can_cancel: false,
+        suggested_quick_replies: ['Report a problem', 'Track complaint', 'End call'],
+      },
     };
   }
 
-  if (currentStage === 'confirm' || lower.includes('confirm') || lower.includes('yes') || lower.includes('submit')) {
-    // Actually submit the complaint to the backend database
-    try {
-      const created = await submitComplaint({
-        title: `${extractedData.category || 'Civic'} issue reported via Voice Helpline`,
-        description: String(extractedData.description || 'Voice report'),
-        location: String(extractedData.location || 'Location provided in voice call'),
-        category: extractedData.category || 'Other',
-        priority: extractedData.priority || 'HIGH',
-        contact_preference: 'voice',
-        source: 'AI Call',
-        latitude: coords?.latitude,
-        longitude: coords?.longitude,
-      });
+  // Confirmation stage
+  if (currentStage === 'confirm') {
+    if (isAffirmativeSpeech(speech)) {
+      try {
+        const created = await submitComplaint({
+          title: `${extractedData.category || 'Civic'} report via Voice Helpline`,
+          description: String(extractedData.description || 'Voice report'),
+          location: String(extractedData.location || 'Reported in voice call'),
+          landmark: extractedData.landmark ? String(extractedData.landmark) : undefined,
+          category: String(extractedData.category || 'Other'),
+          priority: String(extractedData.priority || 'HIGH'),
+          contact_preference: 'voice',
+          source: 'AI Call',
+          latitude: coords?.latitude,
+          longitude: coords?.longitude,
+        });
 
+        const cid = created.complaintNumber || created.id;
+        return {
+          reply_text: `Your complaint has been successfully registered. Your official Complaint ID is ${cid}. It has been routed to the ${created.department || extractedData.department || 'Municipal Department'} with ${created.priority || 'High'} priority. You can track this anytime. Is there anything else I can help you with?`,
+          stage: 'submitted',
+          extracted_data: extractedData,
+          action: 'completed',
+          complaint: {
+            id: created.id,
+            complaint_number: cid,
+            title: created.title,
+            description: created.description,
+            category: created.category,
+            priority: created.priority,
+            department: created.department || String(extractedData.department || 'Municipal Operations'),
+            location: created.location,
+            status: created.status || 'Submitted',
+            created_at: created.submittedAt || new Date().toISOString(),
+          },
+          ui_hints: {
+            status_label: 'SUCCESS',
+            can_confirm: false,
+            can_cancel: false,
+            suggested_quick_replies: ['Track Status', 'Report another issue', 'End Call'],
+          },
+        };
+      } catch {
+        return {
+          reply_text: 'There was an issue registering the complaint. Please try saying confirm again or file via the web form.',
+          stage: 'confirm',
+          extracted_data: extractedData,
+          action: 'confirm',
+          ui_hints: {
+            status_label: 'CONFIRMATION',
+            can_confirm: true,
+            can_cancel: true,
+            suggested_quick_replies: ['Confirm now', 'Cancel'],
+          },
+        };
+      }
+    } else if (isCancelSpeech(speech)) {
       return {
-        reply_text: `Your complaint has been successfully registered. Your ticket ID is ${created.complaintNumber || created.id}. You can track it anytime. Thank you for making your city better!`,
-        stage: 'submitted',
-        extracted_data: extractedData,
-        action: 'completed',
-        complaint: {
-          id: created.id,
-          complaint_number: created.complaintNumber || created.id,
-          title: created.title,
-          description: created.description,
-          category: created.category,
-          priority: created.priority,
-          department: created.department,
-          location: created.location,
-          status: created.status,
-          created_at: created.submittedAt,
-        },
-      };
-    } catch {
-      return {
-        reply_text: "There was an issue persisting the voice complaint. Please try again or use the online reporting form.",
-        stage: 'confirm',
+        reply_text: 'Understood. I will not submit this complaint. Would you like to change any details or cancel?',
+        stage: 'listening',
         extracted_data: extractedData,
         action: 'speak',
+        ui_hints: {
+          status_label: 'COLLECTING DETAILS',
+          can_confirm: false,
+          can_cancel: true,
+          suggested_quick_replies: ['Change location', 'Cancel'],
+        },
       };
     }
   }
 
+  // Location Stage
+  if (currentStage === 'location') {
+    const loc = extractLocationSpeech(speech) || speech;
+    const updated: Record<string, any> = { ...extractedData, location: loc };
+    const summary = `I have understood your complaint: Issue: ${updated.description}. Category: ${updated.category} at ${updated.location}. Priority: ${updated.priority}. Is this information correct? Should I submit this complaint?`;
+    return {
+      reply_text: summary,
+      stage: 'confirm',
+      extracted_data: updated,
+      action: 'confirm',
+      ui_hints: {
+        status_label: 'CONFIRMATION',
+        can_confirm: true,
+        can_cancel: true,
+        suggested_quick_replies: ['Yes, submit it', 'Change location', 'Cancel'],
+      },
+    };
+  }
+
+  // Core Problem Intake
+  const classification = classifyCivicIssue({ description: speech });
+  const locInSpeech = extractLocationSpeech(speech);
+
+  const updatedData: Record<string, unknown> = {
+    ...extractedData,
+    description: speech,
+    category: classification.category,
+    priority: classification.priority,
+    department: classification.department,
+  };
+
+  if (locInSpeech) {
+    updatedData.location = locInSpeech;
+    const summary = `I have understood your complaint: Issue: ${speech}. Category: ${classification.category} (${classification.department}) at ${locInSpeech}. Priority: ${classification.priority}. Is this information correct? Should I submit this complaint?`;
+    return {
+      reply_text: summary,
+      stage: 'confirm',
+      extracted_data: updatedData,
+      action: 'confirm',
+      ui_hints: {
+        status_label: 'CONFIRMATION',
+        can_confirm: true,
+        can_cancel: true,
+        suggested_quick_replies: ['Yes, submit it', 'Change location', 'Cancel'],
+      },
+    };
+  }
+
   return {
-    reply_text: "I didn't quite catch that. Could you please repeat the issue or location?",
-    stage: currentStage as any,
-    extracted_data: extractedData,
-    action: 'listen',
+    reply_text: `I'm sorry you are dealing with that. I have noted this ${classification.category} issue. Could you please tell me the location, street name, or nearest landmark?`,
+    stage: 'location',
+    extracted_data: updatedData,
+    action: 'speak',
+    ui_hints: {
+      status_label: 'COLLECTING DETAILS',
+      can_confirm: false,
+      can_cancel: true,
+      suggested_quick_replies: ['Near the bus stop', 'On Main Road', 'Near Market'],
+    },
   };
 }

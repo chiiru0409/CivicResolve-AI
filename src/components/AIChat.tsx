@@ -48,9 +48,9 @@ function renderMarkdown(text: string): React.ReactNode[] {
 const WELCOME: EnhancedMessage = {
   id:          'welcome',
   role:        'assistant',
-  content:     "Hi there! 👋 I'm **Civic AI**, your intelligent assistant for civic issues.\n\nI can help you with:",
+  content:     "Hello! 👋 I'm **CivicResolve AI**, your municipal operations assistant.\n\nI can help you report civic issues like potholes, garbage, water leaks, streetlights, drainage, or track an existing complaint.\n\nWhat would you like help with today?",
   timestamp:   new Date().toISOString(),
-  quickReplies: ['Report a problem', 'Track my complaint', 'How does this work?', 'Common issues'],
+  quickReplies: ['Report a pothole', 'Garbage not collected', 'Water leakage', 'Track my complaint'],
 };
 
 // ── Component ──────────────────────────────────────────────────────────────────
