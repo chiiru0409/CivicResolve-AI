@@ -11,7 +11,7 @@ Validates:
 7. Sewage overflow
 8. Broken streetlight & live wire hazard
 9. Building structural collapse
-10. Unrelated / non-civic image
+10. Unrelated / non-civic image rejection (IRRELEVANT_IMAGE)
 11. Blurry image quality rejection
 12. Severe darkness rejection
 13. Corrupted / unreadable image safety
@@ -26,7 +26,20 @@ Validates:
 22. Unsupported format robustness
 23. Large image downscaling & aspect ratio preservation
 24. Source transparency annotation
+25. People photo rejection as non-civic (Never classified as structural damage)
+26. Selfie photo rejection as non-civic
+27. Animal / pet photo rejection as non-civic
+28. Normal road (intact) not classified as road damage
+29. Normal building (intact) not classified as building collapse
+30. Normal clean drain not classified as drainage overflow
+31. Clean street not classified as garbage accumulation
+32. Normal water body not classified as water pipeline burst
+33. Normal functioning streetlight not classified as broken streetlight
+34. Overexposed image quality degradation
+35. Regression test: people photo with road complaint flagged as CONTRADICTION & IRRELEVANT
 """
+
+from __future__ import annotations
 
 import base64
 import io
@@ -47,6 +60,7 @@ from vision import (
     analyze_civic_image,
     compute_perceptual_hash,
     evaluate_image_quality,
+    evaluate_image_relevance,
     load_and_preprocess_image,
 )
 
@@ -189,8 +203,9 @@ def test_10_unrelated_non_civic_image():
         filename="birthday_party_celebration_cake.jpg",
         description="Someone celebrating a party",
     )
-    assert res["suggested_category"] == "Other"
-    assert res["primary_issue"] == "General Civic Issue"
+    assert res["analysis_status"] == "IRRELEVANT_IMAGE"
+    assert res["confidence_band"] == "UNVERIFIED"
+    assert res["severity"] == "UNKNOWN"
 
 
 # ── Test 11: Blurry Image Quality Rejection ───────────────────────────────────
@@ -347,7 +362,6 @@ def test_23_large_image_downscaling():
     assert err is None
     assert processed is not None
     assert max(processed.size) <= 1024
-    # Aspect ratio check: 3200/2400 == 4/3 == 1.333
     ratio_orig = 3200 / 2400
     ratio_proc = processed.size[0] / processed.size[1]
     assert abs(ratio_orig - ratio_proc) < 0.02
@@ -363,3 +377,139 @@ def test_24_source_transparency(client):
     data = res.json()
     assert data["source"] in ("MODEL", "DETERMINISTIC", "HYBRID", "HYBRID_CACHE", "FALLBACK")
     assert "inference_time_ms" in data
+
+
+# ── Test 25: People Photo Rejection as Non-Civic ──────────────────────────────
+def test_25_people_photo_rejected_as_non_civic():
+    res = analyze_civic_image(
+        filename="group_people_portrait_outdoor.jpg",
+        description="Two people standing near a street corner",
+    )
+    assert res["analysis_status"] == "IRRELEVANT_IMAGE"
+    assert res["confidence_band"] == "UNVERIFIED"
+    assert res["severity"] == "UNKNOWN"
+    assert res["severity_score"] == 0
+    assert any("person" in obj.lower() or "human" in obj.lower() or "non-civic" in obj.lower() for obj in res["detected_objects"])
+
+
+# ── Test 26: Selfie Photo Rejection as Non-Civic ──────────────────────────────
+def test_26_selfie_rejected_as_non_civic():
+    res = analyze_civic_image(
+        filename="front_camera_selfie_face.jpg",
+        description="Selfie uploaded by citizen",
+    )
+    assert res["analysis_status"] == "IRRELEVANT_IMAGE"
+    assert res["confidence"] <= 20
+    assert res["confidence_band"] == "UNVERIFIED"
+
+
+# ── Test 27: Animal / Pet Photo Rejection as Non-Civic ────────────────────────
+def test_27_animal_rejected_as_non_civic():
+    res = analyze_civic_image(
+        filename="cat_pet_sitting_indoors.jpg",
+        description="My cat at home",
+    )
+    assert res["analysis_status"] == "IRRELEVANT_IMAGE"
+    assert res["severity"] == "UNKNOWN"
+
+
+# ── Test 28: Normal Road (Intact) Not Classified as Road Damage ───────────────
+def test_28_normal_road_no_damage_detected():
+    res = analyze_civic_image(
+        filename="normal_road_asphalt_good_condition.jpg",
+        description="Paved street in good condition",
+    )
+    assert res["analysis_status"] == "NO_CIVIC_DEFECT_DETECTED"
+    assert res["severity"] == "UNKNOWN"
+    assert res["severity_score"] == 0
+
+
+# ── Test 29: Normal Building (Intact) Not Classified as Building Collapse ─────
+def test_29_normal_building_no_collapse():
+    res = analyze_civic_image(
+        filename="normal_building_painted_facade.jpg",
+        description="Residential building exterior",
+    )
+    assert res["analysis_status"] == "NO_CIVIC_DEFECT_DETECTED"
+    assert res["severity"] == "UNKNOWN"
+
+
+# ── Test 30: Normal Clean Drain Not Classified as Drainage Defect ─────────────
+def test_30_normal_clean_drain_no_defect():
+    res = analyze_civic_image(
+        filename="normal_drain_clean_gutter.jpg",
+        description="Clean dry concrete drain",
+    )
+    assert res["analysis_status"] == "NO_CIVIC_DEFECT_DETECTED"
+    assert res["severity"] == "UNKNOWN"
+
+
+# ── Test 31: Clean Street Not Classified as Garbage Accumulation ──────────────
+def test_31_clean_street_no_garbage():
+    res = analyze_civic_image(
+        filename="clean_street_swept_sidewalk.jpg",
+        description="Clean sidewalk after morning sweep",
+    )
+    assert res["analysis_status"] == "NO_CIVIC_DEFECT_DETECTED"
+    assert res["severity"] == "UNKNOWN"
+
+
+# ── Test 32: Normal Water Body Not Classified as Pipeline Burst ───────────────
+def test_32_normal_water_body_no_leak():
+    res = analyze_civic_image(
+        filename="normal_water_lake_scenery.jpg",
+        description="Calm lake view",
+    )
+    assert res["analysis_status"] == "NO_CIVIC_DEFECT_DETECTED"
+    assert res["severity"] == "UNKNOWN"
+
+
+# ── Test 33: Normal Streetlight Not Classified as Broken Streetlight ──────────
+def test_33_normal_streetlight_intact():
+    res = analyze_civic_image(
+        filename="normal_streetlight_functioning_lamp.jpg",
+        description="Working street illumination pole",
+    )
+    assert res["analysis_status"] == "NO_CIVIC_DEFECT_DETECTED"
+    assert res["severity"] == "UNKNOWN"
+
+
+# ── Test 34: Overexposed Image Quality Degradation ────────────────────────────
+def test_34_overexposed_image_rejection():
+    res = analyze_civic_image(
+        filename="overexposed_whiteout_glare.jpg",
+        description="Glare photo",
+    )
+    # The optical gate notes quality degradation
+    assert res["image_quality"]["quality_score"] <= 80
+
+
+# ── Test 35: Regression Test: People Photo with Road Complaint ────────────────
+def test_35_regression_people_photo_with_road_complaint_is_not_other_damage(client):
+    """
+    CRITICAL REGRESSION TEST:
+    Verifies that a photo of ordinary people submitted with a road complaint
+    is NEVER classified as 'Other Damage' with high confidence (e.g. 86%).
+    Must return IRRELEVANT_IMAGE, UNKNOWN severity, UNVERIFIED confidence, and CONTRADICTION.
+    """
+    res = client.post("/api/ai/analyze-image", json={
+        "filename": "portrait_two_people_standing_outdoors.jpg",
+        "description": "Deep road pothole causing traffic jam",
+    })
+    assert res.status_code == 200
+    data = res.json()
+
+    # 1. Must NOT be high confidence
+    assert data["confidence"] <= 20
+    assert data["confidence_band"] == "UNVERIFIED"
+
+    # 2. Must NOT be classified as high/medium damage
+    assert data["severity"] == "UNKNOWN"
+    assert data["severity_score"] == 0
+
+    # 3. Must be flagged as IRRELEVANT_IMAGE
+    assert data["analysis_status"] == "IRRELEVANT_IMAGE"
+
+    # 4. Cross-modal must detect CONTRADICTION (Photo of people vs Road pothole text)
+    assert data["text_visual_consistency"]["status"] == "CONTRADICTION"
+    assert data["text_visual_consistency"]["is_conflict"] is True

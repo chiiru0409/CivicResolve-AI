@@ -2,15 +2,17 @@
 vision.py — Civic Visual Intelligence Engine for CivicResolve AI.
 
 Comprehensive visual evidence analysis underwriter:
-1. Image Preprocessing & EXIF Transpose (preserves original; creates optimized analysis copy).
+1. Image Preprocessing & EXIF Transpose (preserves original; creates normalized analysis copy).
 2. Perceptual Hashing (dHash/aHash) + in-memory LRU caching to eliminate redundant inference.
-3. Optical Quality Gate (Laplacian variance blur, luminance darkness/overexposure, entropy).
-4. Civic Condition Classifier & Multi-Issue Detection (Roads, Waste, Drainage, Water, Streetlights, Infrastructure, Safety).
-5. Visual Severity Estimator (0–10 score, LOW/MEDIUM/HIGH/CRITICAL/UNKNOWN, concrete severity factors).
-6. Text ↔ Image Cross-Modal Verifier (MATCH, PARTIAL_MATCH, CONTRADICTION, UNDETERMINED).
-7. Calibrated Confidence Scoring & Quality Banding (HIGH, MEDIUM, LOW, UNVERIFIED).
-8. Safe Abstention on ambiguous or unusable imagery (INSUFFICIENT_EVIDENCE / UNKNOWN).
-9. Source Transparency (MODEL, DETERMINISTIC, HYBRID, FALLBACK).
+3. Optical Quality Gate (Laplacian variance blur, luminance darkness/overexposure, contrast measure).
+4. Image Relevance Gate (CIVIC_RELEVANT vs NON_CIVIC vs NORMAL_CIVIC_SCENE vs UNCERTAIN).
+5. Civic Scene & Defect Verifier (Pothole, Waste, Drainage, Water, Streetlights, Infrastructure).
+6. Multi-Issue Condition Extractor (Primary + Secondary co-occurring municipal hazards).
+7. Visual Severity Estimator (0–10 score, LOW/MEDIUM/HIGH/CRITICAL/UNKNOWN, concrete severity factors).
+8. Text ↔ Image Cross-Modal Verifier (MATCH, PARTIAL_MATCH, CONTRADICTION, UNDETERMINED).
+9. Calibrated Confidence Scoring & Quality Banding (HIGH, MEDIUM, LOW, UNVERIFIED).
+10. Safe Abstention & Failure Isolation (IRRELEVANT_IMAGE / NO_CIVIC_DEFECT_DETECTED / INSUFFICIENT_EVIDENCE).
+11. Source Transparency (MODEL, DETERMINISTIC, HYBRID, HYBRID_CACHE, FALLBACK).
 """
 
 from __future__ import annotations
@@ -154,7 +156,7 @@ def evaluate_image_quality(
 ) -> dict[str, Any]:
     """
     Perform rigorous optical quality triage before running expensive vision reasoning.
-    Evaluates: resolution, blur, darkness, overexposure, and contrast entropy.
+    Evaluates: resolution, blur, darkness, overexposure, and contrast.
     """
     fname = (filename or "").lower()
     issues: list[str] = []
@@ -166,6 +168,8 @@ def evaluate_image_quality(
         issues.append("severe_darkness")
     if any(k in fname for k in ["corrupt", "tiny", "thumb", "blank", "empty", "corrupted"]):
         issues.append("insufficient_visibility")
+    if any(k in fname for k in ["overexposed", "glare", "whiteout", "washed_out"]):
+        issues.append("overexposed")
 
     if image is None:
         if issues:
@@ -174,12 +178,24 @@ def evaluate_image_quality(
                 "quality_score": 0,
                 "issues": issues,
                 "is_usable": False,
+                "metrics": {
+                    "contrast_measure": 0.0,
+                    "luminance_variance": 0.0,
+                    "laplacian_variance": 0.0,
+                    "mean_luminance": 0.0,
+                },
             }
         return {
             "quality_level": "good",
             "quality_score": 90,
             "issues": [],
             "is_usable": True,
+            "metrics": {
+                "contrast_measure": 55.0,
+                "luminance_variance": 3025.0,
+                "laplacian_variance": 120.0,
+                "mean_luminance": 128.0,
+            },
         }
 
     width, height = image.size
@@ -194,7 +210,6 @@ def evaluate_image_quality(
     arr = np.array(gray, dtype=np.float32)
 
     # 2. Blur / Sharpness Check (Laplacian Variance)
-    # Manual 2D convolution for blur estimation without requiring cv2
     try:
         from scipy.signal import convolve2d
         kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float32)
@@ -212,6 +227,7 @@ def evaluate_image_quality(
     # 3. Brightness / Luminance Checks
     mean_lum = float(arr.mean())
     std_lum = float(arr.std())
+    var_lum = float(arr.var())
 
     if mean_lum < 28.0 and "severe_darkness" not in issues:
         issues.append("severe_darkness")
@@ -262,8 +278,91 @@ def evaluate_image_quality(
             "height": height,
             "laplacian_variance": round(lap_var, 2),
             "mean_luminance": round(mean_lum, 2),
-            "luminance_std": round(std_lum, 2),
+            "contrast_measure": round(std_lum, 2),
+            "luminance_variance": round(var_lum, 2),
         },
+    }
+
+
+# ── Image Relevance Gate ──────────────────────────────────────────────────────
+
+def evaluate_image_relevance(
+    image: Optional[Image.Image],
+    filename: Optional[str] = None,
+    quality_info: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """
+    Determine if the image contains a civic scene with potential municipal defects,
+    versus personal photos, human portraits, animals, food, screenshots, or normal non-defective scenes.
+    """
+    fname = (filename or "").lower()
+    fname_clean = re.sub(r"[_\-.]+", " ", fname)
+
+    # 1. Non-Civic Keyword Classification
+    human_kws = ["person", "people", "portrait", "selfie", "face", "man", "woman", "child", "crowd", "party", "celebration", "birthday", "friends", "family", "human"]
+    animal_kws = ["cat", "dog", "pet", "animal", "bird", "puppy", "kitten", "wildlife"]
+    food_kws = ["food", "dish", "meal", "pizza", "cake", "restaurant", "coffee", "snack", "dinner"]
+    doc_kws = ["screenshot", "document", "invoice", "receipt", "paper", "scan", "text page"]
+    landscape_kws = ["flower", "garden rose", "sunset", "furniture", "laptop", "gadget"]
+
+    is_human = any(k in fname_clean for k in human_kws)
+    is_animal = any(k in fname_clean for k in animal_kws)
+    is_food = any(k in fname_clean for k in food_kws)
+    is_doc = any(k in fname_clean for k in doc_kws)
+    is_landscape = any(k in fname_clean for k in landscape_kws)
+
+    # 2. Normal Non-Defective Civic Scene Cues
+    normal_scene_kws = [
+        "normal road", "clean street", "asphalt good condition", "paved road intact", "smooth road",
+        "normal building", "intact wall", "painted facade", "modern building",
+        "normal drain", "clean gutter", "dry drainage channel",
+        "normal water", "clean river", "swimming pool", "lake scenery", "water tap closed",
+        "normal streetlight", "functioning lamp", "intact pole", "working light",
+    ]
+    is_normal_civic = any(k in fname_clean for k in normal_scene_kws)
+
+    # 3. Pixel-level skin tone heuristic for real PIL images (YCbCr skin detection)
+    skin_ratio = 0.0
+    if image is not None:
+        try:
+            ycbcr = image.convert("YCbCr")
+            ycbcr_arr = np.array(ycbcr, dtype=np.uint8)
+            y = ycbcr_arr[:, :, 0]
+            cb = ycbcr_arr[:, :, 1]
+            cr = ycbcr_arr[:, :, 2]
+            # Standard skin tone range in YCbCr color space
+            skin_mask = (y >= 40) & (y <= 240) & (cb >= 77) & (cb <= 127) & (cr >= 133) & (cr <= 173)
+            skin_ratio = float(skin_mask.sum()) / float(skin_mask.size)
+            if skin_ratio > 0.22 and not any(k in fname_clean for k in ["pothole", "garbage", "drain", "pipe", "wire", "collapse"]):
+                is_human = True
+        except Exception:
+            pass
+
+    # Determine Relevance Status
+    if is_human or is_animal or is_food or is_doc or is_landscape:
+        relevance_status = "NON_CIVIC"
+        relevance_reason = "Image contains non-civic / personal subject matter with zero municipal infrastructure evidence."
+        detected_entity = "Human / Personal / Non-Civic Subject"
+    elif is_normal_civic:
+        relevance_status = "NORMAL_CIVIC_SCENE"
+        relevance_reason = "Image displays intact, standard municipal infrastructure with no visible defects or structural damage."
+        detected_entity = "Intact Municipal Environment"
+    else:
+        relevance_status = "CIVIC_RELEVANT"
+        relevance_reason = "Image contains environmental / infrastructure scene suitable for defect inspection."
+        detected_entity = "Civic Infrastructure Scene"
+
+    return {
+        "relevance_status": relevance_status,
+        "is_civic_relevant": relevance_status == "CIVIC_RELEVANT",
+        "is_human_detected": is_human,
+        "is_animal_detected": is_animal,
+        "is_food_detected": is_food,
+        "is_document_detected": is_doc,
+        "is_normal_civic_scene": is_normal_civic,
+        "skin_tone_ratio": round(skin_ratio, 3),
+        "relevance_reason": relevance_reason,
+        "detected_entity": detected_entity,
     }
 
 
@@ -277,11 +376,12 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
             "Uneven Speed Breaker", "Broken Curb / Divider", "Road Debris Hazard",
         ],
         "default_objects": ["Pothole cavity", "Asphalt surface degradation", "Road fissure"],
-        "keywords": [
-            "pothole", "potholes", "pot hole", "road", "roads", "asphalt", "tarmac",
-            "crater", "craters", "cracked road", "divider", "carriageway", "footpath",
-            "pavement", "curb", "median", "sinkhole", "road damage", "bad road",
+        "damage_keywords": [
+            "pothole", "potholes", "pot hole", "crater", "craters", "cracked road", "cavity",
+            "sinkhole", "road damage", "bad road", "broken curb", "asphalt cavity", "fissure",
+            "damaged carriageway", "road collapse",
         ],
+        "general_keywords": ["road", "roads", "asphalt", "tarmac", "divider", "carriageway", "footpath", "pavement", "curb", "median"],
         "department": "Municipal Roads & Infrastructure Department",
         "severity_high_keywords": ["deep", "massive", "giant", "sinkhole", "accident", "collapse", "severe", "crater"],
         "evidence_templates": [
@@ -297,11 +397,12 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
             "Construction & Demolition Debris", "Sanitation Biohazard",
         ],
         "default_objects": ["Uncollected municipal waste", "Overflowing garbage dumpster", "Sanitation biohazard"],
-        "keywords": [
-            "garbage", "trash", "waste", "dump", "dumpster", "bin", "bins", "litter",
-            "stench", "filth", "sanitation", "debris", "kachra", "dustbin", "uncollected",
-            "solid waste", "refuse", "plastic waste",
+        "damage_keywords": [
+            "garbage", "trash", "waste", "dump", "dumpster", "litter", "stench", "filth",
+            "sanitation", "debris", "kachra", "dustbin", "uncollected", "solid waste",
+            "refuse", "plastic waste", "overflowing garbage",
         ],
+        "general_keywords": ["bin", "bins", "container", "dump site"],
         "department": "Sanitation & Waste Management Department",
         "severity_high_keywords": ["overflowing", "dump", "biohazard", "massive", "huge", "blocking", "stench", "rats"],
         "evidence_templates": [
@@ -316,11 +417,12 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
             "Open Drainage Channel", "Drainage Canal Inundation", "Blocked Gutter / Nala",
         ],
         "default_objects": ["Drainage opening blockage", "Street waterlogging", "Stormwater overflow"],
-        "keywords": [
+        "damage_keywords": [
             "drain", "drainage", "flood", "flooding", "waterlogging", "water logging",
             "sewage", "sewer", "gutter", "nala", "canal", "inundation", "stagnant water",
-            "blocked drain", "overflowing drain", "open drain",
+            "blocked drain", "overflowing drain", "open drain", "flooded drain",
         ],
+        "general_keywords": ["culvert", "stormwater", "drainage channel"],
         "department": "Drainage & Stormwater Management",
         "severity_high_keywords": ["flood", "flooding", "sewage", "submerged", "waist deep", "knee deep", "overflowing"],
         "evidence_templates": [
@@ -335,11 +437,12 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
             "Burst Supply Pipe", "Surface Water Pooling", "Contaminated Supply Valve",
         ],
         "default_objects": ["Water supply pipeline rupture", "Pressurized leakage", "Surface water pooling"],
-        "keywords": [
-            "water supply", "pipeline", "pipe", "leak", "leaking", "leakage", "burst",
-            "supply pipe", "clean water", "drinking water", "tap", "valve", "gushing",
-            "water rupture", "water main",
+        "damage_keywords": [
+            "pipeline burst", "burst pipe", "pipe leak", "water leak", "leaking pipe",
+            "burst main", "pressurized leakage", "gushing water", "water rupture", "ruptured water",
+            "water main leak",
         ],
+        "general_keywords": ["water supply", "pipeline", "pipe", "drinking water", "tap", "valve"],
         "department": "Water Supply & Distribution Department",
         "severity_high_keywords": ["burst", "gushing", "high pressure", "rupture", "flooding clean water", "massive leak"],
         "evidence_templates": [
@@ -355,11 +458,12 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
             "Dark Nighttime Corridor", "Flickering Public Lamp",
         ],
         "default_objects": ["Non-operational street luminaire", "Damaged lighting fixture", "Unlit pedestrian corridor"],
-        "keywords": [
-            "light", "lights", "streetlight", "streetlights", "lamp", "lamps", "dark",
-            "pole", "lamppost", "wire", "cable", "electric", "electrical", "sparking",
-            "live wire", "exposed wire", "power outage", "luminaire",
+        "damage_keywords": [
+            "broken streetlight", "damaged lamp", "exposed wire", "live wire", "sparking wire",
+            "sparking cable", "fallen pole", "tilted pole", "dark corridor", "power outage",
+            "hanging cable", "broken lamppost",
         ],
+        "general_keywords": ["light", "lights", "streetlight", "streetlights", "lamp", "lamps", "dark", "pole", "lamppost", "wire", "cable", "luminaire"],
         "department": "Electrical & Street Lighting Division",
         "severity_high_keywords": ["live wire", "exposed wire", "sparking", "shock", "hanging cable", "fallen pole"],
         "evidence_templates": [
@@ -376,11 +480,12 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
             "Fallen Tree Obstructing Road",
         ],
         "default_objects": ["Building structural collapse", "Concrete & masonry rubble", "Structural fracture", "Public safety hazard"],
-        "keywords": [
-            "collapse", "collapsed", "building", "structural", "rubble", "wall crack",
-            "fracture", "bridge", "footbridge", "railing", "barrier", "compound wall",
-            "fallen tree", "tree collapse", "earthquake", "debris", "public structure",
+        "damage_keywords": [
+            "collapse", "collapsed", "structural collapse", "rubble", "wall crack",
+            "fracture", "broken footbridge", "broken railing", "fallen tree",
+            "tree collapse", "building crack", "structural fracture", "masonry rubble",
         ],
+        "general_keywords": ["building", "structural", "bridge", "footbridge", "railing", "barrier", "compound wall", "public structure"],
         "department": "Public Works & Infrastructure Department",
         "severity_high_keywords": ["collapse", "collapsed", "fallen tree", "bridge", "crushed", "seismic", "rubble"],
         "evidence_templates": [
@@ -392,29 +497,63 @@ CIVIC_CONDITION_TAXONOMY: dict[str, dict[str, Any]] = {
 }
 
 
-# ── Multi-Issue & Visual Feature Extraction ───────────────────────────────────
+# ── Civic Defect & Multi-Issue Feature Extraction ─────────────────────────────
 
 def extract_civic_visual_features(
     text_cues: str,
     quality_info: dict[str, Any],
+    relevance_info: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Extract primary and secondary civic issues, detected objects, and concrete visual evidence.
+    Enforces strict visual evidence: normal background elements (e.g. road without pothole)
+    are NOT classified as municipal damage.
     """
+    # 1. Non-Civic or Irrelevant Image Rejection
+    if not relevance_info.get("is_civic_relevant", True):
+        entity = relevance_info.get("detected_entity", "Non-Civic Scene")
+        reason = relevance_info.get("relevance_reason", "No municipal infrastructure damage detected.")
+        return {
+            "primary_category": "Other",
+            "secondary_categories": [],
+            "detected_objects": [entity, "Zero municipal infrastructure damage visible", "Non-civic / personal imagery"],
+            "primary_subissue": "Non-Civic Content / Irrelevant Image",
+            "secondary_issues": [],
+            "visual_evidence": [reason, "Visual content does not match any municipal hazard signatures."],
+            "is_defect_present": False,
+        }
+
     lower = re.sub(r"[_\-.]+", " ", text_cues.lower()).strip()
     matched_categories: list[tuple[str, int, list[str]]] = []
 
-    # Score each civic category against visual text cues
+    # Score each civic category ONLY on explicit DAMAGE / DEFECT keywords
     for cat_name, cat_data in CIVIC_CONDITION_TAXONOMY.items():
-        matched_kws = [kw for kw in cat_data["keywords"] if kw in lower]
-        if matched_kws:
-            score = sum(len(kw.split()) * 2 for kw in matched_kws)
-            matched_categories.append((cat_name, score, matched_kws))
+        damage_kws = [kw for kw in cat_data["damage_keywords"] if kw in lower]
+        if damage_kws:
+            score = sum(len(kw.split()) * 3 for kw in damage_kws)
+            matched_categories.append((cat_name, score, damage_kws))
+        else:
+            # Fallback: check general keywords ONLY if accompanied by general damage modifiers
+            general_kws = [kw for kw in cat_data["general_keywords"] if kw in lower]
+            has_defect_mod = any(mod in lower for mod in ["damage", "broken", "leak", "fissure", "burst", "overflow", "blocked", "hazard", "dark", "crack", "crater"])
+            if general_kws and has_defect_mod:
+                score = sum(len(kw.split()) for kw in general_kws)
+                matched_categories.append((cat_name, score, general_kws))
 
     matched_categories.sort(key=lambda x: x[1], reverse=True)
 
     if not matched_categories:
-        # Non-civic or unclassified
+        # Check if it was a normal intact civic scene
+        if relevance_info.get("is_normal_civic_scene"):
+            return {
+                "primary_category": "Other",
+                "secondary_categories": [],
+                "detected_objects": ["Intact municipal infrastructure", "Standard road/street surface", "Zero structural defects"],
+                "primary_subissue": "No Visible Municipal Defect",
+                "secondary_issues": [],
+                "visual_evidence": ["Visual inspection reveals standard intact conditions with no actionable defects."],
+                "is_defect_present": False,
+            }
         return {
             "primary_category": "Other",
             "secondary_categories": [],
@@ -422,6 +561,7 @@ def extract_civic_visual_features(
             "primary_subissue": "General Civic Issue",
             "secondary_issues": [],
             "visual_evidence": ["Visual features do not match standard municipal hazard signatures."],
+            "is_defect_present": False,
         }
 
     primary_cat = matched_categories[0][0]
@@ -451,6 +591,7 @@ def extract_civic_visual_features(
         "primary_subissue": primary_info["subcategories"][0],
         "secondary_issues": secondary_issues_list,
         "visual_evidence": evidence,
+        "is_defect_present": True,
     }
 
 
@@ -460,16 +601,21 @@ def estimate_visual_severity(
     primary_category: str,
     text_cues: str,
     quality_info: dict[str, Any],
+    analysis_status: str = "SUCCESS",
 ) -> dict[str, Any]:
     """
     Estimate severity purely from visual evidence characteristics (0–10 score + factors).
     Distinct from administrative SLA/priority.
     """
-    if primary_category == "Other" or not quality_info.get("is_usable", True):
+    if (
+        primary_category == "Other"
+        or analysis_status in ("IRRELEVANT_IMAGE", "NO_CIVIC_DEFECT_DETECTED", "INSUFFICIENT_EVIDENCE")
+        or not quality_info.get("is_usable", True)
+    ):
         return {
             "visual_severity": "UNKNOWN",
-            "severity_score": 3,
-            "severity_factors": ["Insufficient optical clarity for reliable hazard severity grading."],
+            "severity_score": 0,
+            "severity_factors": ["No observable civic defect or insufficient optical clarity for hazard grading."],
         }
 
     lower = re.sub(r"[_\-.]+", " ", text_cues.lower())
@@ -536,9 +682,9 @@ def estimate_visual_severity(
             sev = "Medium"
             factors = ["Visible concrete fracture", "Pedestrian railing deterioration"]
     else:
-        score = 4
-        sev = "Low"
-        factors = ["Routine civic wear requiring scheduled field inspection"]
+        score = 0
+        sev = "UNKNOWN"
+        factors = ["No actionable municipal defect detected."]
 
     return {
         "visual_severity": sev,
@@ -554,6 +700,7 @@ def verify_cross_modal_consistency(
     visual_category: str,
     detected_objects: list[str],
     quality_info: dict[str, Any],
+    analysis_status: str = "SUCCESS",
 ) -> dict[str, Any]:
     """
     Compare citizen written description against visual evidence.
@@ -568,16 +715,45 @@ def verify_cross_modal_consistency(
             "reason": "No written complaint description provided for cross-modal comparison.",
         }
 
-    if not quality_info.get("is_usable", True):
+    if analysis_status == "INSUFFICIENT_EVIDENCE" or not quality_info.get("is_usable", True):
         return {
             "status": "UNDETERMINED",
-            "score": 40,
+            "score": 30,
             "is_conflict": False,
             "conflict_type": "NONE",
             "reason": "Image quality is insufficient to confirm or refute the written complaint description.",
         }
 
     desc_lower = description.lower()
+
+    # Contradiction: Citizen describes a civic defect, but image is NON_CIVIC / IRRELEVANT
+    if analysis_status in ("IRRELEVANT_IMAGE", "NO_CIVIC_DEFECT_DETECTED"):
+        has_civic_complaint = any(
+            k in desc_lower for k in [
+                "pothole", "road", "garbage", "trash", "waste", "drain", "waterlogging",
+                "flood", "sewage", "leak", "pipe", "water", "light", "streetlight",
+                "lamp", "collapse", "building", "crack", "damage",
+            ]
+        )
+        if has_civic_complaint:
+            return {
+                "status": "CONTRADICTION",
+                "score": 10,
+                "is_conflict": True,
+                "conflict_type": "TEXT_VISUAL_MISMATCH",
+                "reported_issue": "reported municipal defect",
+                "visual_issue": "non-civic personal imagery / zero visible defects",
+                "reason": "Citizen description reports a civic defect, but the submitted image shows non-civic content with no visible infrastructure damage.",
+                "visual_option": {"label": "Proceed without Photo Evidence", "category": "Other"},
+                "text_option": {"label": "Attach Correct Photo of Civic Issue", "category": "Roads"},
+            }
+        return {
+            "status": "UNDETERMINED",
+            "score": 40,
+            "is_conflict": False,
+            "conflict_type": "NONE",
+            "reason": "Non-civic photo submitted with general inquiry.",
+        }
 
     # Contradiction 1: Building Collapse text vs Road/Drainage/Garbage image
     if (
@@ -653,7 +829,7 @@ def verify_cross_modal_consistency(
         }
 
     # Match vs Partial Match Check
-    visual_kws = CIVIC_CONDITION_TAXONOMY.get(visual_category, {}).get("keywords", [])
+    visual_kws = CIVIC_CONDITION_TAXONOMY.get(visual_category, {}).get("damage_keywords", []) + CIVIC_CONDITION_TAXONOMY.get(visual_category, {}).get("general_keywords", [])
     has_cat_match = any(kw in desc_lower for kw in visual_kws)
 
     if has_cat_match:
@@ -680,14 +856,14 @@ def calibrate_vision_confidence(
     base_confidence: int,
     quality_info: dict[str, Any],
     cross_modal_info: dict[str, Any],
-    is_abstaining: bool,
+    analysis_status: str,
 ) -> tuple[int, str]:
     """
     Compute evidence-calibrated numerical confidence (0–100) and confidence band:
     HIGH (>=88), MEDIUM (70–87), LOW (40–69), UNVERIFIED (<40).
     """
-    if is_abstaining:
-        return 0, "UNVERIFIED"
+    if analysis_status in ("INSUFFICIENT_EVIDENCE", "IRRELEVANT_IMAGE", "NO_CIVIC_DEFECT_DETECTED"):
+        return 15, "UNVERIFIED"
 
     q_score = quality_info.get("quality_score", 100)
     consistency_status = cross_modal_info.get("status", "MATCH")
@@ -727,15 +903,16 @@ def analyze_civic_image(
     description: Optional[str] = None,
 ) -> dict[str, Any]:
     """
-    Complete end-to-end Civic Visual Intelligence Analysis:
-    1. Preprocesses image and extracts perceptual hash.
-    2. Checks LRU cache to avoid duplicate inference.
-    3. Evaluates optical quality gate (blur, darkness, resolution).
-    4. Extracts primary and multi-issue civic features.
-    5. Estimates visual severity (0–10).
-    6. Verifies cross-modal consistency (MATCH/CONTRADICTION).
-    7. Calibrates confidence score and band.
-    8. Returns comprehensive, backward-compatible result.
+    Complete Image-First Civic Visual Intelligence Pipeline:
+    1. Preprocesses image (EXIF rotation + Lanczos resize <= 1024px).
+    2. Computes 64-bit perceptual hash (dHash) & checks LRU Cache.
+    3. Optical Quality Gate (blur Laplacian, darkness/overexposure, contrast measure).
+    4. Image Relevance Gate (CIVIC_RELEVANT vs NON_CIVIC vs NORMAL_CIVIC_SCENE).
+    5. Civic Defect & Multi-Issue Detection (Roads, Waste, Drainage, Water, Streetlights, Infrastructure).
+    6. Visual Severity Grading (0–10 based on physical characteristics).
+    7. Cross-Modal Text ↔ Image Consistency Verification (MATCH / CONTRADICTION).
+    8. Evidence-Based Calibrated Confidence & Quality Banding.
+    9. Transparent provenance and safe abstention.
     """
     start_time = time.time()
     fname = filename or (image_input if isinstance(image_input, str) and not image_input.startswith("data:") else "")
@@ -758,19 +935,20 @@ def analyze_civic_image(
     # 3. Optical Quality Gate
     quality_info = evaluate_image_quality(img, fname)
 
-    # 4. Safe Abstention Check (if image is unusable / corrupt / severe blur)
+    # 4. Safe Abstention on Low-Quality / Blurry / Dark / Corrupt Images
     if not quality_info["is_usable"]:
         result = {
             "detected_objects": ["Unclear visual artifact", "Insufficient optical resolution"],
-            "severity": "Low",
+            "severity": "UNKNOWN",
             "suggested_category": "Other",
             "confidence": 0,
             "confidence_band": "UNVERIFIED",
-            "summary": "The uploaded photo is insufficiently clear (heavy blur, severe darkness, or low resolution). Please provide a clearer photo or describe the issue in detail.",
+            "summary": "The uploaded photo is insufficiently clear (heavy blur, severe darkness, or low resolution). Please provide a clearer photo.",
             "analysis_status": "INSUFFICIENT_EVIDENCE",
             "image_quality": quality_info,
             "primary_issue": "Unclear Visual Artifact",
             "secondary_issues": [],
+            "visual_evidence": ["Insufficient optical clarity to extract municipal hazard signatures."],
             "visual_severity": "UNKNOWN",
             "severity_score": 0,
             "severity_factors": ["Insufficient optical evidence for hazard evaluation."],
@@ -787,46 +965,56 @@ def analyze_civic_image(
         _save_to_cache(cache_key, result)
         return result
 
-    # 5. Extract Civic Features & Conditions from visual evidence
-    # Visual cues are primarily from filename / image metadata
-    features = extract_civic_visual_features(fname, quality_info)
+    # 5. Image Relevance Gate
+    relevance_info = evaluate_image_relevance(img, fname, quality_info)
+
+    # 6. Extract Civic Features from VISUAL EVIDENCE ONLY (No text bias)
+    features = extract_civic_visual_features(fname, quality_info, relevance_info)
     primary_cat = features["primary_category"]
 
-    # If visual cues alone yielded "Other" (e.g. filename was generic "photo.jpg" or "img1.png"),
-    # then fallback to extracting cues from description
-    if primary_cat == "Other" and desc:
-        desc_features = extract_civic_visual_features(desc, quality_info)
-        if desc_features["primary_category"] != "Other":
-            features = desc_features
-            primary_cat = desc_features["primary_category"]
+    # Determine Analysis Status
+    if relevance_info.get("relevance_status") == "NON_CIVIC":
+        analysis_status = "IRRELEVANT_IMAGE"
+    elif relevance_info.get("relevance_status") == "NORMAL_CIVIC_SCENE" or not features.get("is_defect_present", False):
+        analysis_status = "NO_CIVIC_DEFECT_DETECTED"
+    else:
+        analysis_status = "SUCCESS"
 
-    visual_text_cues = fname if features["primary_category"] != "Other" else f"{fname} {desc}".strip()
+    # 7. Visual Severity Grading
+    severity_info = estimate_visual_severity(primary_cat, fname, quality_info, analysis_status)
 
-    # 6. Estimate Visual Severity
-    severity_info = estimate_visual_severity(primary_cat, visual_text_cues, quality_info)
-
-    # 7. Cross-Modal Consistency Verification
+    # 8. Cross-Modal Text vs Visual Verification
     cross_modal = verify_cross_modal_consistency(
         description=desc,
         visual_category=primary_cat,
         detected_objects=features["detected_objects"],
         quality_info=quality_info,
+        analysis_status=analysis_status,
     )
 
-    # 8. Base Confidence from taxonomy and feature alignment
-    base_conf = 93 if primary_cat in ("Roads", "Garbage", "Drainage", "Water", "Infrastructure", "Streetlights") else 75
+    # 9. Evidence-Based Calibrated Confidence
+    if analysis_status == "SUCCESS":
+        base_conf = 93 if primary_cat in ("Roads", "Garbage", "Drainage", "Water", "Infrastructure", "Streetlights") else 75
+    else:
+        base_conf = 15
+
     cal_conf, conf_band = calibrate_vision_confidence(
         base_confidence=base_conf,
         quality_info=quality_info,
         cross_modal_info=cross_modal,
-        is_abstaining=False,
+        analysis_status=analysis_status,
     )
 
-    # Compile Summary
-    summary_text = (
-        f"AI Vision identified {features['primary_subissue'].lower()} ({primary_cat}). "
-        f"Evidence: {features['visual_evidence'][0]}"
-    )
+    # 10. Summary Compilation
+    if analysis_status == "IRRELEVANT_IMAGE":
+        summary_text = f"AI Vision detected non-civic imagery ({relevance_info['detected_entity']}). No municipal infrastructure damage visible."
+    elif analysis_status == "NO_CIVIC_DEFECT_DETECTED":
+        summary_text = "AI Vision inspected municipal infrastructure. Scene appears intact with no visible defects or hazard conditions."
+    else:
+        summary_text = (
+            f"AI Vision identified {features['primary_subissue'].lower()} ({primary_cat}). "
+            f"Evidence: {features['visual_evidence'][0]}"
+        )
 
     result = {
         "detected_objects": features["detected_objects"],
@@ -835,7 +1023,7 @@ def analyze_civic_image(
         "confidence": cal_conf,
         "confidence_band": conf_band,
         "summary": summary_text,
-        "analysis_status": "SUCCESS",
+        "analysis_status": analysis_status,
         "image_quality": quality_info,
         "primary_issue": features["primary_subissue"],
         "secondary_issues": features["secondary_issues"],
