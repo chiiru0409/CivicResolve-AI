@@ -29,6 +29,16 @@ export interface ComprehensiveVisionResult extends ImageAnalysis {
     score: number;
     box: { top: string; left: string; width: string; height: string };
   }>;
+  analysisStatus?: 'SUCCESS' | 'INSUFFICIENT_EVIDENCE' | 'UNKNOWN';
+  primaryIssue?: string;
+  secondaryIssues?: string[];
+  visualEvidence?: string[];
+  visualSeverity?: string;
+  severityScore?: number;
+  severityFactors?: string[];
+  perceptualHash?: string;
+  source?: string;
+  inferenceTimeMs?: number;
 }
 
 /** Validate image file format and file size */
@@ -165,19 +175,49 @@ export async function analyzeImageEvidence(
         suggested_category: Category;
         confidence: number;
         summary: string;
+        confidence_band?: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNVERIFIED';
+        analysis_status?: 'SUCCESS' | 'INSUFFICIENT_EVIDENCE' | 'UNKNOWN';
+        primary_issue?: string;
+        secondary_issues?: string[];
+        visual_evidence?: string[];
+        visual_severity?: string;
+        severity_score?: number;
+        severity_factors?: string[];
+        text_visual_consistency?: {
+          status: string;
+          score: number;
+          is_conflict: boolean;
+          conflict_type?: 'TEXT_VISUAL_MISMATCH' | 'NONE';
+          reason?: string;
+          visual_option?: { label: string; category: Category };
+          text_option?: { label: string; category: Category };
+        };
+        perceptual_hash?: string;
+        source?: string;
+        inference_time_ms?: number;
       }>('/ai/analyze-image', {
         description: description || '',
         filename: file.name,
       });
 
-      const conflictCheck = description ? detectContradiction(description, res.suggested_category) : { isConflict: false, conflictType: 'NONE' as const, message: null };
+      const conflictCheck = res.text_visual_consistency?.is_conflict !== undefined
+        ? {
+            isConflict: Boolean(res.text_visual_consistency.is_conflict),
+            conflictType: (res.text_visual_consistency.conflict_type as 'TEXT_VISUAL_MISMATCH' | 'NONE') || (res.text_visual_consistency.is_conflict ? 'TEXT_VISUAL_MISMATCH' : 'NONE'),
+            message: res.text_visual_consistency.reason || null,
+            visualOption: res.text_visual_consistency.visual_option,
+            textOption: res.text_visual_consistency.text_option,
+          }
+        : description
+        ? detectContradiction(description, res.suggested_category)
+        : { isConflict: false, conflictType: 'NONE' as const, message: null };
 
       return {
         detectedObjects: res.detected_objects,
         severity: res.severity,
         suggestedCategory: res.suggested_category,
         confidence: res.confidence,
-        confidenceGrade: res.confidence >= 90 ? 'HIGH' : res.confidence >= 75 ? 'MEDIUM' : 'LOW',
+        confidenceGrade: res.confidence_band || (res.confidence >= 90 ? 'HIGH' : res.confidence >= 75 ? 'MEDIUM' : 'LOW'),
         imageQuality: quality,
         visualEvidenceSummary: res.summary || `Detected ${res.detected_objects.join(', ')}`,
         recommendedDepartment: `${res.suggested_category} Department`,
@@ -189,7 +229,17 @@ export async function analyzeImageEvidence(
           visualOption: conflictCheck.visualOption,
           textOption: conflictCheck.textOption,
         } : undefined,
-        multiIssuesDetected: multiIssues.length > 1 ? multiIssues : undefined,
+        multiIssuesDetected: res.secondary_issues && res.secondary_issues.length > 0 ? [res.primary_issue || res.suggested_category, ...res.secondary_issues] : (multiIssues.length > 1 ? multiIssues : undefined),
+        analysisStatus: res.analysis_status,
+        primaryIssue: res.primary_issue,
+        secondaryIssues: res.secondary_issues,
+        visualEvidence: res.visual_evidence,
+        visualSeverity: res.visual_severity,
+        severityScore: res.severity_score,
+        severityFactors: res.severity_factors,
+        perceptualHash: res.perceptual_hash,
+        source: res.source,
+        inferenceTimeMs: res.inference_time_ms,
       };
     } catch {
       // Fall through to deterministic vision intelligence

@@ -1957,129 +1957,19 @@ def handle_chat(
 @router.post("/ai/analyze-image", response_model=ImageAnalysisResponse)
 def analyze_image_endpoint(body: ImageAnalysisRequest):
     """
-    Intelligent civic vision AI underwriter.
+    Intelligent civic visual intelligence underwriter.
     Correlates visual proof with incident context to identify hazard, objects, severity, and civic category.
     Prioritizes actual visual image cues to detect mismatches with written citizen descriptions.
     """
-    from classifier import classify
-    from priority import detect_priority
+    from vision import analyze_civic_image
 
-    img_text = (body.filename or '').lower()
-    desc_text = (body.description or '').lower()
-    combined_text = f"{desc_text} {img_text}".strip()
-
-    # 1. First inspect the visual evidence itself (from filename / image metadata)
-    if any(k in img_text for k in ["pothole", "road", "asphalt", "tarmac", "cracked road", "divider", "carriageway", "footpath"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Pothole cavity", "Asphalt surface degradation", "Road fissure"],
-            severity="High",
-            suggested_category="Roads",
-            confidence=93,
-            summary="AI Vision detected road surface hazard requiring asphalt leveling and repaving.",
-        )
-    elif any(k in img_text for k in ["garbage", "trash", "waste", "dump", "bin", "litter", "stench"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Uncollected municipal waste", "Overflowing garbage dumpster", "Sanitation biohazard"],
-            severity="High",
-            suggested_category="Garbage",
-            confidence=91,
-            summary="AI Vision identified unmanaged municipal solid waste accumulation creating public health hazard.",
-        )
-    elif any(k in img_text for k in ["drain", "drainage", "flood", "waterlogging", "sewage", "water logging"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Drainage opening blockage", "Street waterlogging", "Stormwater overflow"],
-            severity="High",
-            suggested_category="Drainage",
-            confidence=92,
-            summary="AI Vision identified stormwater drainage blockage causing standing water hazard.",
-        )
-    elif any(k in img_text for k in ["water", "pipeline", "pipe", "leak", "burst", "supply"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Water supply pipeline rupture", "Pressurized leakage", "Surface water pooling"],
-            severity="High",
-            suggested_category="Water",
-            confidence=92,
-            summary="AI Vision detected active potable water pipeline breach requiring valve shutoff and pipe repair.",
-        )
-    elif any(k in img_text for k in ["light", "streetlight", "lamp", "dark", "pole"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Non-operational street luminaire", "Damaged lighting fixture", "Unlit pedestrian corridor"],
-            severity="Medium",
-            suggested_category="Streetlights",
-            confidence=89,
-            summary="AI Vision identified lighting fixture failure causing reduced nighttime visibility.",
-        )
-    elif any(k in img_text for k in ["collapse", "earthquake", "building", "structural", "rubble", "wall crack", "fracture", "bridge"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Building structural collapse", "Concrete & masonry rubble", "Structural fracture", "Public safety hazard"],
-            severity="Critical",
-            suggested_category="Infrastructure",
-            confidence=95,
-            summary="AI Vision confirms structural civic failure consistent with building collapse or seismic impact.",
-        )
-
-    # 2. If visual image features are ambiguous, evaluate combined description
-    if any(k in combined_text for k in ["collapse", "earthquake", "building", "structural", "rubble", "wall crack", "fracture", "bridge"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Building structural collapse", "Concrete & masonry rubble", "Structural fracture", "Public safety hazard"],
-            severity="Critical",
-            suggested_category="Infrastructure",
-            confidence=95,
-            summary="AI Vision confirms structural civic failure consistent with building collapse or seismic impact.",
-        )
-    elif any(k in combined_text for k in ["pothole", "road", "asphalt", "tarmac", "cracked road", "divider", "carriageway"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Pothole cavity", "Asphalt surface degradation", "Road fissure"],
-            severity="High",
-            suggested_category="Roads",
-            confidence=93,
-            summary="AI Vision detected road surface hazard requiring asphalt leveling and repaving.",
-        )
-    elif any(k in combined_text for k in ["garbage", "trash", "waste", "dump", "bin", "litter", "stench"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Uncollected municipal waste", "Overflowing garbage dumpster", "Sanitation biohazard"],
-            severity="High",
-            suggested_category="Garbage",
-            confidence=91,
-            summary="AI Vision identified unmanaged municipal solid waste accumulation creating public health hazard.",
-        )
-    elif any(k in combined_text for k in ["drain", "drainage", "flood", "waterlogging", "sewage", "water logging"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Drainage opening blockage", "Street waterlogging", "Stormwater overflow"],
-            severity="High",
-            suggested_category="Drainage",
-            confidence=92,
-            summary="AI Vision identified stormwater drainage blockage causing standing water hazard.",
-        )
-    elif any(k in combined_text for k in ["water", "pipeline", "pipe", "leak", "burst", "supply"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Water supply pipeline rupture", "Pressurized leakage", "Surface water pooling"],
-            severity="High",
-            suggested_category="Water",
-            confidence=92,
-            summary="AI Vision detected active potable water pipeline breach requiring valve shutoff and pipe repair.",
-        )
-    elif any(k in combined_text for k in ["light", "streetlight", "lamp", "dark", "pole"]):
-        return ImageAnalysisResponse(
-            detected_objects=["Non-operational street luminaire", "Damaged lighting fixture", "Unlit pedestrian corridor"],
-            severity="Medium",
-            suggested_category="Streetlights",
-            confidence=89,
-            summary="AI Vision identified lighting fixture failure causing reduced nighttime visibility.",
-        )
-
-    # Fallback to text classification
-    cat = classify(text) if text else "Infrastructure"
-    pri = detect_priority(text) if text else "HIGH"
-    sev = "Critical" if pri == "CRITICAL" else "High" if pri == "HIGH" else "Medium"
-    
-    return ImageAnalysisResponse(
-        detected_objects=[f"{cat} anomaly detected", "Civic surface degradation", "Field inspection recommended"],
-        severity=sev,
-        suggested_category=cat if cat != "Other" else "Infrastructure",
-        confidence=88,
-        summary=f"AI Vision processed evidence photo. Identified civic anomaly consistent with {cat}.",
+    img_input = body.image_data or body.filename
+    res = analyze_civic_image(
+        image_input=img_input,
+        filename=body.filename,
+        description=body.description,
     )
+    return ImageAnalysisResponse(**res)
 
 
 @router.post("/voice/turn", response_model=VoiceTurnResponse)

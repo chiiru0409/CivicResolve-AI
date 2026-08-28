@@ -468,6 +468,19 @@ class ImageAnalysisResponse(BaseModel):
     suggested_category: str
     confidence: int
     summary: str
+    confidence_band: Optional[str] = None
+    analysis_status: Optional[str] = "SUCCESS"
+    image_quality: Optional[dict[str, Any]] = None
+    primary_issue: Optional[str] = None
+    secondary_issues: Optional[list[str]] = None
+    visual_evidence: Optional[list[str]] = None
+    visual_severity: Optional[str] = None
+    severity_score: Optional[int] = None
+    severity_factors: Optional[list[str]] = None
+    text_visual_consistency: Optional[dict[str, Any]] = None
+    perceptual_hash: Optional[str] = None
+    source: Optional[str] = "HYBRID"
+    inference_time_ms: Optional[float] = None
 
 
 # ══════════════════════════════════════════════════════════════
