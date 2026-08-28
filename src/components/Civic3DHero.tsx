@@ -387,6 +387,7 @@ export const Civic3DHero: React.FC = () => {
 
   // Real-time complaints state sync
   const fetchActiveComplaints = useCallback(async () => {
+    if (typeof window === 'undefined' || !localStorage.getItem('civic_token')) return;
     try {
       const mine = await getMineComplaints();
       if (mine && mine.length > 0) {

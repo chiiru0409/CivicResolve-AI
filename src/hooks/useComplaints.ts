@@ -15,7 +15,7 @@ interface AdminCacheEntry {
   timestamp: number;
 }
 
-const CACHE_TTL_MS = 5000;
+const CACHE_TTL_MS = 15000;
 const _adminCache = new Map<string, AdminCacheEntry>();
 let _citizenCache: { complaints: Complaint[]; timestamp: number } | null = null;
 
@@ -39,15 +39,15 @@ export function invalidateCitizenComplaintsCache() {
 
 // ── Citizen: own complaints list ──────────────────────────────────────────────
 export function useCitizenComplaints() {
-  const isCacheFresh = _citizenCache != null && (Date.now() - _citizenCache.timestamp < CACHE_TTL_MS);
-  const [complaints, setComplaints] = useState<Complaint[]>(() => isCacheFresh ? _citizenCache!.complaints : []);
-  const [loading, setLoading]       = useState<boolean>(() => !isCacheFresh);
+  const hasCached = _citizenCache != null;
+  const [complaints, setComplaints] = useState<Complaint[]>(() => hasCached ? _citizenCache!.complaints : []);
+  const [loading, setLoading]       = useState<boolean>(() => !hasCached);
   const [error, setError]           = useState<string | null>(null);
   const mountedRef                  = useRef(true);
 
   const load = useCallback(async (isBackground = false) => {
     const isFresh = _citizenCache != null && (Date.now() - _citizenCache.timestamp < CACHE_TTL_MS);
-    if (!isBackground && !isFresh) {
+    if (!isBackground && !isFresh && !_citizenCache) {
       setLoading(true);
     }
     setError(null);
@@ -72,7 +72,7 @@ export function useCitizenComplaints() {
   useEffect(() => {
     mountedRef.current = true;
     const isFresh = _citizenCache != null && (Date.now() - _citizenCache.timestamp < CACHE_TTL_MS);
-    if (isFresh && _citizenCache) {
+    if (_citizenCache) {
       setComplaints(_citizenCache.complaints);
       setLoading(false);
     }
@@ -96,15 +96,30 @@ export function useCitizenComplaints() {
 }
 
 // ── Single complaint detail ───────────────────────────────────────────────────
+const _singleComplaintCache = new Map<string, { complaint: Complaint; timestamp: number }>();
+
+export function invalidateSingleComplaintCache(id?: string) {
+  if (id) {
+    _singleComplaintCache.delete(id);
+  } else {
+    _singleComplaintCache.clear();
+  }
+}
+
 export function useComplaint(id?: string) {
-  const [complaint, setComplaint] = useState<Complaint | null>(null);
-  const [loading, setLoading]     = useState<boolean>(true);
+  const cached = id ? _singleComplaintCache.get(id) : null;
+  const isFresh = cached != null && (Date.now() - cached.timestamp < CACHE_TTL_MS);
+  const [complaint, setComplaint] = useState<Complaint | null>(() => cached ? cached.complaint : null);
+  const [loading, setLoading]     = useState<boolean>(() => !cached);
   const [error, setError]         = useState<string | null>(null);
   const [notFound, setNotFound]   = useState<boolean>(false);
   const mountedRef                = useRef(true);
 
-  const load = useCallback(async (targetId: string) => {
-    setLoading(true);
+  const load = useCallback(async (targetId: string, isBackground = false) => {
+    const currentCached = _singleComplaintCache.get(targetId);
+    if (!isBackground && !currentCached) {
+      setLoading(true);
+    }
     setError(null);
     setNotFound(false);
     try {
@@ -113,6 +128,7 @@ export function useComplaint(id?: string) {
       if (!data) {
         setNotFound(true);
       } else {
+        _singleComplaintCache.set(targetId, { complaint: data, timestamp: Date.now() });
         setComplaint(data);
       }
     } catch (err) {
@@ -127,7 +143,13 @@ export function useComplaint(id?: string) {
   useEffect(() => {
     mountedRef.current = true;
     if (id) {
-      void load(id);
+      const currentCached = _singleComplaintCache.get(id);
+      const fresh = currentCached != null && (Date.now() - currentCached.timestamp < CACHE_TTL_MS);
+      if (currentCached) {
+        setComplaint(currentCached.complaint);
+        setLoading(false);
+      }
+      void load(id, fresh);
     } else {
       setLoading(false);
     }
@@ -136,7 +158,7 @@ export function useComplaint(id?: string) {
     };
   }, [id, load]);
 
-  return { complaint, loading, error, notFound, refetch: () => id && load(id) };
+  return { complaint, loading, error, notFound, refetch: () => id && load(id, false) };
 }
 
 // ── Public complaint tracker ──────────────────────────────────────────────────
@@ -148,22 +170,22 @@ export function useTrackComplaint(complaintNumber?: string) {
   const mountedRef                = useRef(true);
 
   const search = useCallback(async (num: string) => {
-    if (!num.trim()) return;
+    const clean = num.trim();
+    if (!clean) return;
     setLoading(true);
     setError(null);
     setNotFound(false);
     try {
-      const data = await trackComplaint(num.trim());
+      const data = await trackComplaint(clean);
       if (!mountedRef.current) return;
       if (!data) {
         setNotFound(true);
-        setComplaint(null);
       } else {
         setComplaint(data);
       }
     } catch (err) {
       if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : 'Tracking lookup failed.');
+        setError(err instanceof Error ? err.message : 'Failed to retrieve complaint tracking data.');
       }
     } finally {
       if (mountedRef.current) setLoading(false);
@@ -191,23 +213,24 @@ export function useAdminComplaints(filters?: Record<string, string>) {
   const filtersKey = JSON.stringify(cleanFilters);
 
   const cached = _adminCache.get(filtersKey);
+  const hasCached = cached != null;
   const isCacheFresh = cached != null && (Date.now() - cached.timestamp < CACHE_TTL_MS);
-  const [complaints, setComplaints] = useState<Complaint[]>(() => isCacheFresh ? cached.complaints : []);
-  const [total, setTotal]           = useState<number>(() => isCacheFresh ? cached.total : 0);
-  const [loading, setLoading]       = useState<boolean>(() => !isCacheFresh);
+  const [complaints, setComplaints] = useState<Complaint[]>(() => hasCached ? cached.complaints : []);
+  const [total, setTotal]           = useState<number>(() => hasCached ? cached.total : 0);
+  const [loading, setLoading]       = useState<boolean>(() => !hasCached);
   const [error, setError]           = useState<string | null>(null);
   const mountedRef                  = useRef(true);
 
   const load = useCallback(async (isBackground = false) => {
     const currentCached = _adminCache.get(filtersKey);
     const isFresh = currentCached != null && (Date.now() - currentCached.timestamp < CACHE_TTL_MS);
-    if (!isBackground && !isFresh) {
+    if (!isBackground && !isFresh && !currentCached) {
       setLoading(true);
     }
     setError(null);
     try {
       const parsedFilters: Record<string, string> = JSON.parse(filtersKey);
-      const params = new URLSearchParams({ ...parsedFilters, _t: Date.now().toString() });
+      const params = new URLSearchParams(parsedFilters);
       const data = await api.get<{ total: number; items: Record<string, unknown>[] }>(
         `/admin/complaints?${params.toString()}`,
       );
@@ -240,7 +263,7 @@ export function useAdminComplaints(filters?: Record<string, string>) {
     mountedRef.current = true;
     const currentCached = _adminCache.get(filtersKey);
     const isFresh = currentCached != null && (Date.now() - currentCached.timestamp < CACHE_TTL_MS);
-    if (isFresh && currentCached) {
+    if (currentCached) {
       setComplaints(currentCached.complaints);
       setTotal(currentCached.total);
       setLoading(false);

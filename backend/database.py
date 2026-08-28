@@ -222,16 +222,26 @@ CREATE TABLE IF NOT EXISTS departments (
 
 # ── Index DDL (all IF NOT EXISTS so re-runs are safe) ──────────────────────────
 _INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_users_email                ON users(email);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_complaint_number ON complaints(complaint_number);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_citizen_id       ON complaints(citizen_id);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_status           ON complaints(status);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_priority         ON complaints(priority);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_department       ON complaints(department);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_created_at       ON complaints(created_at);",
-    "CREATE INDEX IF NOT EXISTS idx_complaints_category         ON complaints(category);",
-    "CREATE INDEX IF NOT EXISTS idx_updates_complaint_id        ON complaint_updates(complaint_id);",
-    "CREATE INDEX IF NOT EXISTS idx_assignments_complaint_id    ON assignments(complaint_id);",
+    "CREATE INDEX IF NOT EXISTS idx_users_email                 ON users(email);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_complaint_number  ON complaints(complaint_number);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_citizen_id        ON complaints(citizen_id);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_status            ON complaints(status);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_priority          ON complaints(priority);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_department        ON complaints(department);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_created_at        ON complaints(created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_category          ON complaints(category);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_citizen_created   ON complaints(citizen_id, created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_citizen_status    ON complaints(citizen_id, status);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_status_priority   ON complaints(status, priority);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_dept_status       ON complaints(department, status);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_status_created    ON complaints(status, created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_prio_created      ON complaints(priority, created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_cat_created       ON complaints(category, created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_dept_created      ON complaints(department, created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_complaints_geo_active        ON complaints(latitude, longitude, status);",
+    "CREATE INDEX IF NOT EXISTS idx_updates_complaint_id         ON complaint_updates(complaint_id);",
+    "CREATE INDEX IF NOT EXISTS idx_updates_comp_created         ON complaint_updates(complaint_id, created_at);",
+    "CREATE INDEX IF NOT EXISTS idx_assignments_complaint_id     ON assignments(complaint_id);",
 ]
 
 # ── Columns added in migrations (safe ALTER TABLE) ─────────────────────────────
@@ -373,9 +383,30 @@ class PostgresCursorWrapper:
         self._cur.close()
 
 
+import threading
+
+_PG_POOL: Any = None
+_PG_POOL_LOCK = threading.Lock()
+
+
+def _get_pg_pool(db_url: str):
+    global _PG_POOL
+    if _PG_POOL is None:
+        with _PG_POOL_LOCK:
+            if _PG_POOL is None:
+                try:
+                    from psycopg2 import pool
+                    _PG_POOL = pool.ThreadedConnectionPool(minconn=1, maxconn=20, dsn=db_url)
+                except Exception as e:
+                    logger.warning("Could not initialize ThreadedConnectionPool: %s", e)
+                    _PG_POOL = None
+    return _PG_POOL
+
+
 class PostgresConnectionWrapper:
-    def __init__(self, conn):
+    def __init__(self, conn, pool_instance=None):
         self._conn = conn
+        self._pool = pool_instance
 
     def execute(self, sql: str, params: Any = None):
         cur = self.cursor()
@@ -393,19 +424,32 @@ class PostgresConnectionWrapper:
         return PostgresCursorWrapper(cur)
 
     def commit(self):
-        self._conn.commit()
+        if self._conn and not self._conn.closed:
+            self._conn.commit()
 
     def rollback(self):
         try:
-            self._conn.rollback()
+            if self._conn and not self._conn.closed:
+                self._conn.rollback()
         except Exception:
             pass
 
     def close(self):
-        try:
-            self._conn.close()
-        except Exception:
-            pass
+        if self._pool and self._conn:
+            try:
+                self._pool.putconn(self._conn)
+            except Exception:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+            self._conn = None
+        elif self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
 
     def __enter__(self):
         return self
@@ -417,16 +461,73 @@ class PostgresConnectionWrapper:
             self.commit()
 
 
-# ── Public connection helper ───────────────────────────────────────────────────
+_SQLITE_LOCAL = threading.local()
+
+
+class SQLiteConnectionWrapper:
+    """
+    High-performance thread-local connection wrapper for local SQLite.
+    Prevents repeated connection setup and PRAGMA execution overhead across requests.
+    """
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def execute(self, sql: str, params: Any = ()):
+        return self._conn.execute(sql, params)
+
+    def executemany(self, sql: str, params_seq: Any):
+        return self._conn.executemany(sql, params_seq)
+
+    def cursor(self):
+        return self._conn.cursor()
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+
+    def close(self):
+        # Connection is preserved in thread-local storage for rapid reuse
+        pass
+
+    def __enter__(self):
+        return self._conn.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
+
+def _get_thread_sqlite_conn() -> sqlite3.Connection:
+    conn = getattr(_SQLITE_LOCAL, "conn", None)
+    if conn is None:
+        DB_DIR.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=15.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA cache_size=10000;")
+        conn.execute("PRAGMA temp_store=MEMORY;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        _SQLITE_LOCAL.conn = conn
+    return conn
+
 
 def get_connection():
     """
     Return an active database connection.
     In production (Vercel):
-      - Connects ONLY to PostgreSQL (Neon).
+      - Connects ONLY to PostgreSQL (Neon) using high-performance connection pooling.
       - If DATABASE_URL is missing or fails, FAILS LOUDLY without falling back to ephemeral SQLite.
     In local development:
-      - Connects to PostgreSQL if DATABASE_URL is set; otherwise falls back to local database/civic.db.
+      - Connects to PostgreSQL if DATABASE_URL is set; otherwise falls back to local database/civic.db with thread-local pooling.
     """
     db_url = _resolve_db_url()
     is_prod = is_production()
@@ -434,6 +535,18 @@ def get_connection():
     if db_url and db_url.startswith(("postgres://", "postgresql://")):
         try:
             import psycopg2
+            pg_pool = _get_pg_pool(db_url)
+            if pg_pool:
+                try:
+                    conn = pg_pool.getconn()
+                    if conn.closed:
+                        conn = psycopg2.connect(db_url)
+                    conn.autocommit = True
+                    return PostgresConnectionWrapper(conn, pool_instance=pg_pool)
+                except Exception as pool_err:
+                    logger.warning("Pool checkout failed, falling back to direct connection: %s", pool_err)
+            
+            # Fallback to direct connection if pool unavailable
             conn = psycopg2.connect(db_url)
             conn.autocommit = True
             return PostgresConnectionWrapper(conn)
@@ -451,14 +564,8 @@ def get_connection():
             "Ephemeral SQLite fallback is strictly disabled in production to guarantee data consistency across lambdas."
         )
 
-    # Local development SQLite connection
-    DB_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.execute("PRAGMA busy_timeout=5000;")
-    return conn
+    # Local development SQLite connection with thread-local high-throughput reuse
+    return SQLiteConnectionWrapper(_get_thread_sqlite_conn())
 
 
 def get_database_diagnostics() -> dict:

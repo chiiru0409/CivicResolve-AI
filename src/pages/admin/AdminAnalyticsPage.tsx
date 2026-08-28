@@ -73,11 +73,11 @@ export default function AdminAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadAnalytics = useCallback(async () => {
-    setLoading(true);
+  const loadAnalytics = useCallback(async (force = false) => {
+    if (!summary && !force) setLoading(true);
     setError(null);
     try {
-      const data = await api.get<Record<string, unknown>>('/admin/analytics');
+      const data = await api.getCached<Record<string, unknown>>('/admin/analytics', { forceRefresh: force, ttlMs: 10000 });
       const byCat = Array.isArray(data.by_category)
         ? data.by_category.map((x: any) => ({ category: String(x.category || 'Other'), count: Number(x.count || 0) }))
         : [];
@@ -116,15 +116,21 @@ export default function AdminAnalyticsPage() {
         byPriority: byPri,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load analytics telemetry from database.');
+      if (!summary) {
+        setError(err instanceof Error ? err.message : 'Failed to load analytics telemetry from database.');
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [summary]);
 
   useEffect(() => {
     void loadAnalytics();
-  }, [loadAnalytics]);
+
+    const handleUpdate = () => void loadAnalytics(true);
+    window.addEventListener('complaints:updated', handleUpdate);
+    return () => window.removeEventListener('complaints:updated', handleUpdate);
+  }, []);
 
   const catData = (summary?.byCategory || []).map((x) => ({ label: x.category, value: x.count }));
   const priData = (summary?.byPriority || []).map((x) => ({ label: x.priority, value: x.count }));

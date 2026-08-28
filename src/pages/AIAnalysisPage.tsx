@@ -53,12 +53,19 @@ const AIAnalysisPage: React.FC = () => {
   }, []);
 
   const runAnalysis = async (data: Record<string, string>) => {
-    const stepDelays = [400, 800, 1200, 1600, 2000, 2400];
-    stepDelays.forEach((d, idx) => {
-      setTimeout(() => {
-        setSteps((prev) => prev.map((s, i) => ({ ...s, done: i < idx, active: i === idx })));
-      }, d);
-    });
+    const stepTimer = setInterval(() => {
+      setSteps((prev) => {
+        const activeIdx = prev.findIndex((s) => s.active);
+        if (activeIdx >= 0 && activeIdx < prev.length - 1) {
+          return prev.map((s, i) => ({
+            ...s,
+            done: i <= activeIdx,
+            active: i === activeIdx + 1,
+          }));
+        }
+        return prev;
+      });
+    }, 100);
 
     try {
       const [aiRes, dupRes] = await Promise.all([
@@ -71,7 +78,7 @@ const AIAnalysisPage: React.FC = () => {
         }).catch(() => null),
       ]);
 
-      await new Promise((r) => setTimeout(r, 400));
+      clearInterval(stepTimer);
       setSteps((prev) => prev.map((s) => ({ ...s, done: true, active: false })));
       setAnalysis(aiRes);
       if (aiRes.hasConflict) {
@@ -84,6 +91,7 @@ const AIAnalysisPage: React.FC = () => {
       }
       setPhase('result');
     } catch {
+      clearInterval(stepTimer);
       setPhase('error');
     }
   };

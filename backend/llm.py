@@ -32,6 +32,8 @@ import logging
 import os
 import urllib.error
 import urllib.request
+import hashlib
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,34 @@ logger = logging.getLogger(__name__)
 # ── Configuration (override via environment variables) ────────────────────────
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL:    str = os.getenv("OLLAMA_MODEL",    "qwen2.5:3b")
-OLLAMA_TIMEOUT:  int = int(os.getenv("OLLAMA_TIMEOUT", "30"))   # seconds
+OLLAMA_TIMEOUT:  float = float(os.getenv("OLLAMA_TIMEOUT", "1.5"))   # Fast 1.5s timeout to prevent blocking worker threads
+
+# ── Fast Circuit Breaker & LRU Cache for AI Inference ─────────────────────────
+_CIRCUIT_BREAKER_OPEN_UNTIL: float = 0.0
+_CIRCUIT_BREAKER_FAILURES: int = 0
+_CIRCUIT_BREAKER_COOLDOWN: float = 60.0  # seconds
+
+_ANALYSIS_CACHE: dict[str, tuple[float, dict]] = {}
+_ANALYSIS_CACHE_TTL: float = 3600.0  # 1 hour
+_MAX_CACHE_ENTRIES: int = 500
+
+
+def is_circuit_open() -> bool:
+    global _CIRCUIT_BREAKER_OPEN_UNTIL
+    return time.time() < _CIRCUIT_BREAKER_OPEN_UNTIL
+
+
+def trip_circuit_breaker(reason: str = ""):
+    global _CIRCUIT_BREAKER_OPEN_UNTIL, _CIRCUIT_BREAKER_FAILURES
+    _CIRCUIT_BREAKER_FAILURES += 1
+    _CIRCUIT_BREAKER_OPEN_UNTIL = time.time() + _CIRCUIT_BREAKER_COOLDOWN
+    logger.warning("LLM Circuit Breaker tripped for %ds (%s). Fast deterministic fallback enabled.", int(_CIRCUIT_BREAKER_COOLDOWN), reason)
+
+
+def reset_circuit_breaker():
+    global _CIRCUIT_BREAKER_OPEN_UNTIL, _CIRCUIT_BREAKER_FAILURES
+    _CIRCUIT_BREAKER_FAILURES = 0
+    _CIRCUIT_BREAKER_OPEN_UNTIL = 0.0
 
 # ── Authoritative CivicResolve domain values ──────────────────────────────────
 # LLM output must be validated against these — it cannot invent new values.
@@ -155,8 +184,11 @@ Response: {"category":"Infrastructure","subcategory":"Fallen Tree","priority":"H
 def call_ollama(complaint_text: str) -> Optional[str]:
     """
     Send complaint to Ollama and return the raw response string.
-    Returns None on any network/timeout/server error.
+    Returns None immediately if circuit breaker is open or on any network/timeout error.
     """
+    if is_circuit_open():
+        return None
+
     url     = f"{OLLAMA_BASE_URL}/api/generate"
     payload = json.dumps({
         "model":  OLLAMA_MODEL,
@@ -179,15 +211,16 @@ def call_ollama(complaint_text: str) -> Optional[str]:
         with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
             body = resp.read().decode("utf-8")
             data = json.loads(body)
+            reset_circuit_breaker()
             return data.get("response", "").strip()
     except urllib.error.URLError as e:
-        logger.warning("Ollama unavailable (%s). Using rule-based fallback.", e.reason)
+        trip_circuit_breaker(f"Ollama unavailable: {e.reason}")
         return None
     except TimeoutError:
-        logger.warning("Ollama request timed out after %ds. Using rule-based fallback.", OLLAMA_TIMEOUT)
+        trip_circuit_breaker(f"Ollama request timed out after {OLLAMA_TIMEOUT}s")
         return None
     except Exception as e:
-        logger.warning("Unexpected error calling Ollama: %s. Using rule-based fallback.", e)
+        trip_circuit_breaker(f"Unexpected error calling Ollama: {e}")
         return None
 
 
@@ -333,21 +366,29 @@ def validate_llm_result(raw_data: dict, description: str) -> Optional[dict]:
 def analyze_with_llm(description: str) -> Optional[dict]:
     """
     Main entry point called by agent.py.
-
-    Returns a validated analysis dict on success, or None if:
-    - Ollama is not running
-    - Model is not installed
-    - LLM response is malformed
-    - Any other error
-
-    agent.py must fall back to rule engines when this returns None.
+    Checks memory cache first, then attempts fast probe to LLM with circuit breaker.
     """
+    clean_desc = (description or "").strip()
+    if not clean_desc:
+        return None
+
+    # Check in-memory cache
+    cache_key = hashlib.md5(clean_desc.lower().encode("utf-8")).hexdigest()
+    cached = _ANALYSIS_CACHE.get(cache_key)
+    if cached:
+        cached_ts, cached_val = cached
+        if time.time() - cached_ts < _ANALYSIS_CACHE_TTL:
+            return cached_val
+
+    if is_circuit_open():
+        return None
+
     logger.info("Local LLM analysis started — model: %s", OLLAMA_MODEL)
 
     # 1. Call Ollama
-    raw_text = call_ollama(description)
+    raw_text = call_ollama(clean_desc)
     if raw_text is None:
-        return None  # Ollama unavailable — logged in call_ollama()
+        return None  # Ollama unavailable or circuit breaker open
 
     logger.debug("Raw LLM response: %r", raw_text[:400])
 
@@ -358,10 +399,15 @@ def analyze_with_llm(description: str) -> Optional[dict]:
         return None
 
     # 3. Validate and normalise
-    result = validate_llm_result(raw_data, description)
+    result = validate_llm_result(raw_data, clean_desc)
     if result is None:
         logger.warning("LLM result failed validation — using rule-based fallback.")
         return None
+
+    # Cache successful result
+    if len(_ANALYSIS_CACHE) >= _MAX_CACHE_ENTRIES:
+        _ANALYSIS_CACHE.pop(next(iter(_ANALYSIS_CACHE)))
+    _ANALYSIS_CACHE[cache_key] = (time.time(), result)
 
     logger.info(
         "Local LLM analysis completed — category: %s | priority: %s | confidence: %s%%",
@@ -423,8 +469,11 @@ Rules:
 def chat_with_llm(user_message: str, history: list[dict]) -> Optional[str]:
     """
     Send conversation turn to Ollama.
-    Returns generated text response or None on failure/timeout.
+    Returns generated text response or None on failure/timeout or if circuit breaker is open.
     """
+    if is_circuit_open():
+        return None
+
     url = f"{OLLAMA_BASE_URL}/api/chat"
     
     # Format messages for Ollama /api/chat
@@ -454,11 +503,12 @@ def chat_with_llm(user_message: str, history: list[dict]) -> Optional[str]:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
             body = resp.read().decode("utf-8")
             data = json.loads(body)
+            reset_circuit_breaker()
             return data.get("message", {}).get("content", "").strip()
     except Exception as e:
-        logger.warning("Ollama chat call failed: %s. Using fallback.", e)
+        trip_circuit_breaker(f"Ollama chat error: {e}")
         return None
 

@@ -36,10 +36,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import time
 
 import auth as auth_module
 from auth import (
@@ -70,7 +71,6 @@ from schemas import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="CivicResolve AI",
     description="AI-powered civic complaint management API",
@@ -81,6 +81,37 @@ app = FastAPI(
 )
 
 router = APIRouter()
+
+# ── Server-Side High Performance Micro-Cache ──────────────────────────────────
+_SERVER_CACHE: dict[str, tuple[float, Any]] = {}
+_SERVER_CACHE_TTL = 5.0  # 5 seconds default TTL
+
+def get_server_cached(key: str) -> Optional[Any]:
+    entry = _SERVER_CACHE.get(key)
+    if entry:
+        ts, data = entry
+        if time.time() - ts < _SERVER_CACHE_TTL:
+            return data
+    return None
+
+def set_server_cached(key: str, data: Any):
+    _SERVER_CACHE[key] = (time.time(), data)
+
+def invalidate_server_cache(prefix: Optional[str] = None):
+    if not prefix:
+        _SERVER_CACHE.clear()
+    else:
+        for k in list(_SERVER_CACHE.keys()):
+            if prefix in k:
+                _SERVER_CACHE.pop(k, None)
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time = (time.perf_counter() - start_time) * 1000
+    response.headers["X-Process-Time"] = f"{process_time:.2f}ms"
+    return response
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 cors_origins_env = os.getenv("CORS_ORIGINS")
@@ -210,6 +241,68 @@ def _fetch_assignments(conn, complaint_id: str) -> list[dict]:
         (complaint_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def _batch_fetch_complaint_relations(conn, rows: list) -> tuple[dict[str, list], dict[str, list], dict[int, dict]]:
+    """
+    High-performance batch fetcher for complaint updates, assignments, and citizen info.
+    Eliminates N+1 query storms by resolving all relations in 3 single SQL queries with IN (...).
+    """
+    if not rows:
+        return {}, {}, {}
+
+    complaint_ids = set()
+    citizen_ids = set()
+    for r in rows:
+        r_dict = dict(r)
+        if r_dict.get("id"):
+            complaint_ids.add(str(r_dict["id"]))
+        if r_dict.get("complaint_number"):
+            complaint_ids.add(str(r_dict["complaint_number"]))
+        if r_dict.get("citizen_id"):
+            citizen_ids.add(int(r_dict["citizen_id"]))
+
+    updates_map: dict[str, list] = {}
+    assignments_map: dict[str, list] = {}
+    citizens_map: dict[int, dict] = {}
+
+    if complaint_ids:
+        c_list = list(complaint_ids)
+        placeholders = ",".join(["?"] * len(c_list))
+        
+        # 1. Batch fetch all updates for all complaints in 1 query
+        u_rows = conn.execute(
+            f"SELECT * FROM complaint_updates WHERE complaint_id IN ({placeholders}) ORDER BY created_at ASC;",
+            c_list,
+        ).fetchall()
+        for u in u_rows:
+            u_d = dict(u)
+            cid = str(u_d["complaint_id"])
+            updates_map.setdefault(cid, []).append(u_d)
+
+        # 2. Batch fetch all assignments for all complaints in 1 query
+        a_rows = conn.execute(
+            f"SELECT * FROM assignments WHERE complaint_id IN ({placeholders}) ORDER BY assigned_at ASC;",
+            c_list,
+        ).fetchall()
+        for a in a_rows:
+            a_d = dict(a)
+            cid = str(a_d["complaint_id"])
+            assignments_map.setdefault(cid, []).append(a_d)
+
+    if citizen_ids:
+        cit_list = list(citizen_ids)
+        placeholders = ",".join(["?"] * len(cit_list))
+        # 3. Batch fetch all citizens in 1 query
+        user_rows = conn.execute(
+            f"SELECT id, full_name, email, phone FROM users WHERE id IN ({placeholders});",
+            cit_list,
+        ).fetchall()
+        for u in user_rows:
+            u_d = dict(u)
+            citizens_map[int(u_d["id"])] = u_d
+
+    return updates_map, assignments_map, citizens_map
 
 
 def _row_to_complaint_out(row: dict, updates: list, assignments: list, citizen: Optional[dict] = None) -> dict:
@@ -533,6 +626,7 @@ def submit_complaint(body: ComplaintCreate, current_user: dict = Depends(require
         updates     = _fetch_updates(conn, complaint_id)
         assignments = _fetch_assignments(conn, complaint_id)
         result = _row_to_complaint_out(dict(row), updates, assignments)
+        invalidate_server_cache()
         return result
     finally:
         conn.close()
@@ -568,6 +662,7 @@ async def upload_image(
                 "UPDATE complaints SET image_path = ?, updated_at = ? WHERE id = ?;",
                 (image_path, _now_iso(), complaint_id),
             )
+        invalidate_server_cache()
         return {"image_path": image_path}
     finally:
         conn.close()
@@ -585,12 +680,16 @@ def get_my_complaints(current_user: dict = Depends(require_citizen)):
             """,
             (citizen_id,),
         ).fetchall()
+        row_dicts = [dict(r) for r in rows]
+        updates_map, assignments_map, _ = _batch_fetch_complaint_relations(conn, row_dicts)
+
         result = []
-        for r in rows:
-            real_id = r["id"]
-            updates = _fetch_updates(conn, real_id)
-            assignments = _fetch_assignments(conn, real_id)
-            result.append(_row_to_complaint_out(dict(r), updates, assignments))
+        for r in row_dicts:
+            real_id = str(r["id"])
+            comp_num = str(r.get("complaint_number") or real_id)
+            updates = updates_map.get(real_id) or updates_map.get(comp_num) or []
+            assignments = assignments_map.get(real_id) or assignments_map.get(comp_num) or []
+            result.append(_row_to_complaint_out(r, updates, assignments))
         return result
     finally:
         conn.close()
@@ -744,6 +843,11 @@ def get_map_incidents(
     Returns unresolved complaints (status != Resolved AND status != Closed AND status != Archived)
     with valid latitude and longitude coordinates.
     """
+    cache_key = f"map_incidents_{include_resolved}_{category}_{priority}"
+    cached = get_server_cached(cache_key)
+    if cached is not None:
+        return cached
+
     conn = get_connection()
     try:
         where_clauses = [
@@ -789,6 +893,7 @@ def get_map_incidents(
                 "evidence_quality": d.get("evidence_quality") or "LOW",
                 "created_at": d.get("created_at") or "",
             })
+        set_server_cached(cache_key, result)
         return result
     finally:
         conn.close()
@@ -896,6 +1001,7 @@ def rate_complaint(complaint_id: str, body: ComplaintRatingRequest):
                 (real_id, msg),
             )
 
+        invalidate_server_cache()
         return ComplaintRatingResponse(
             complaint_id=real_id,
             complaint_number=comp_num,
@@ -955,17 +1061,17 @@ def admin_list_complaints(
         ).fetchall()
 
         total = conn.execute(f"SELECT COUNT(*) FROM complaints {where_sql};", params).fetchone()[0]
+        row_dicts = [dict(r) for r in rows]
+        updates_map, assignments_map, citizens_map = _batch_fetch_complaint_relations(conn, row_dicts)
+
         items = []
-        for r in rows:
-            real_id = r["id"]
-            updates = _fetch_updates(conn, real_id)
-            assignments = _fetch_assignments(conn, real_id)
-            citizen = None
-            if r["citizen_id"]:
-                u_row = conn.execute("SELECT id, full_name, email, phone FROM users WHERE id = ?;", (r["citizen_id"],)).fetchone()
-                if u_row:
-                    citizen = dict(u_row)
-            items.append(_row_to_complaint_out(dict(r), updates, assignments, citizen))
+        for r in row_dicts:
+            real_id = str(r["id"])
+            comp_num = str(r.get("complaint_number") or real_id)
+            updates = updates_map.get(real_id) or updates_map.get(comp_num) or []
+            assignments = assignments_map.get(real_id) or assignments_map.get(comp_num) or []
+            citizen = citizens_map.get(r.get("citizen_id"))
+            items.append(_row_to_complaint_out(r, updates, assignments, citizen))
 
         return {"total": total, "items": items}
     finally:
@@ -1029,6 +1135,7 @@ def admin_update_status(
         updated_row = conn.execute("SELECT * FROM complaints WHERE id = ?;", (real_id,)).fetchone()
         updates     = _fetch_updates(conn, real_id)
         assignments = _fetch_assignments(conn, real_id)
+        invalidate_server_cache()
         return _row_to_complaint_out(dict(updated_row), updates, assignments)
     finally:
         conn.close()
@@ -1068,6 +1175,7 @@ def admin_assign_complaint(
                 "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Assigned', ?, ?);",
                 (real_id, f"Assigned to {body.department}" + (f" — {body.officer}" if body.officer else ""), body.assigned_by),
             )
+        invalidate_server_cache()
         return {"success": True, "message": "Assignment saved."}
     finally:
         conn.close()
@@ -1075,15 +1183,32 @@ def admin_assign_complaint(
 
 @router.get("/admin/analytics")
 def admin_analytics(current_user: dict = Depends(require_admin)):
+    cached = get_server_cached("admin_analytics")
+    if cached is not None:
+        return cached
+
     conn = get_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
-        high  = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) IN ('HIGH','CRITICAL');").fetchone()[0]
-        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved','closed','archived');").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved','closed');").fetchone()[0]
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(CASE WHEN UPPER(priority) IN ('HIGH', 'CRITICAL') THEN 1 END) AS high,
+                COUNT(CASE WHEN LOWER(status) NOT IN ('resolved', 'closed', 'archived') THEN 1 END) AS pending,
+                COUNT(CASE WHEN LOWER(status) IN ('resolved', 'closed') THEN 1 END) AS resolved,
+                COUNT(CASE WHEN citizen_rating IS NOT NULL THEN 1 END) AS total_ratings,
+                AVG(citizen_rating) AS avg_rating_val
+            FROM complaints;
+            """
+        ).fetchone()
 
-        total_ratings = conn.execute("SELECT COUNT(*) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
-        avg_rating_val = conn.execute("SELECT AVG(citizen_rating) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
+        d = dict(row) if row else {}
+        total = int(d.get("total") or 0)
+        high = int(d.get("high") or 0)
+        pending = int(d.get("pending") or 0)
+        resolved = int(d.get("resolved") or 0)
+        total_ratings = int(d.get("total_ratings") or 0)
+        avg_rating_val = d.get("avg_rating_val")
         avg_rating = round(float(avg_rating_val), 1) if avg_rating_val is not None else 0.0
 
         # Star breakdown (5..1)
@@ -1134,7 +1259,7 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
             "SELECT department, COUNT(*) as count FROM complaints WHERE department IS NOT NULL GROUP BY department ORDER BY count DESC;"
         ).fetchall()
 
-        return {
+        res = {
             "total_complaints": total,
             "high_priority": high,
             "pending": pending,
@@ -1149,31 +1274,56 @@ def admin_analytics(current_user: dict = Depends(require_admin)):
             "by_status":     [{"status":     r[0], "count": r[1]} for r in by_sta],
             "by_department": [{"department": r[0], "count": r[1]} for r in by_dep],
         }
+        set_server_cached("admin_analytics", res)
+        return res
     finally:
         conn.close()
 
 
 @router.get("/admin/overview")
 def admin_overview(current_user: dict = Depends(require_admin)):
+    cached = get_server_cached("admin_overview")
+    if cached is not None:
+        return cached
+
     conn = get_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
-        submitted = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'submitted';").fetchone()[0]
-        assigned = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'assigned';").fetchone()[0]
-        in_progress = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'in progress';").fetchone()[0]
-        inspection = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) = 'inspection';").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved', 'closed');").fetchone()[0]
-        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived');").fetchone()[0]
-        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) IN ('HIGH', 'CRITICAL');").fetchone()[0]
-        critical = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) = 'CRITICAL';").fetchone()[0]
-        active_incidents = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND latitude IS NOT NULL AND longitude IS NOT NULL AND (latitude != 0 OR longitude != 0);").fetchone()[0]
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(CASE WHEN LOWER(status) = 'submitted' THEN 1 END) AS submitted,
+                COUNT(CASE WHEN LOWER(status) = 'assigned' THEN 1 END) AS assigned,
+                COUNT(CASE WHEN LOWER(status) = 'in progress' THEN 1 END) AS in_progress,
+                COUNT(CASE WHEN LOWER(status) = 'inspection' THEN 1 END) AS inspection,
+                COUNT(CASE WHEN LOWER(status) IN ('resolved', 'closed') THEN 1 END) AS resolved,
+                COUNT(CASE WHEN LOWER(status) NOT IN ('resolved', 'closed', 'archived') THEN 1 END) AS pending,
+                COUNT(CASE WHEN UPPER(priority) IN ('HIGH', 'CRITICAL') THEN 1 END) AS high_prio,
+                COUNT(CASE WHEN UPPER(priority) = 'CRITICAL' THEN 1 END) AS critical,
+                COUNT(CASE WHEN LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND latitude IS NOT NULL AND longitude IS NOT NULL AND (latitude != 0 OR longitude != 0) THEN 1 END) AS active_incidents,
+                COUNT(CASE WHEN citizen_rating IS NOT NULL THEN 1 END) AS total_ratings,
+                AVG(citizen_rating) AS avg_rating_val
+            FROM complaints;
+            """
+        ).fetchone()
 
-        total_ratings = conn.execute("SELECT COUNT(*) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
-        avg_rating_val = conn.execute("SELECT AVG(citizen_rating) FROM complaints WHERE citizen_rating IS NOT NULL;").fetchone()[0]
+        d = dict(row) if row else {}
+        total = int(d.get("total") or 0)
+        submitted = int(d.get("submitted") or 0)
+        assigned = int(d.get("assigned") or 0)
+        in_progress = int(d.get("in_progress") or 0)
+        inspection = int(d.get("inspection") or 0)
+        resolved = int(d.get("resolved") or 0)
+        pending = int(d.get("pending") or 0)
+        high_prio = int(d.get("high_prio") or 0)
+        critical = int(d.get("critical") or 0)
+        active_incidents = int(d.get("active_incidents") or 0)
+        total_ratings = int(d.get("total_ratings") or 0)
+        avg_rating_val = d.get("avg_rating_val")
         avg_rating = round(float(avg_rating_val), 1) if avg_rating_val is not None else 0.0
 
         log_db_operation("admin_overview", total)
-        return {
+        res = {
             "total_complaints": total,
             "submitted": submitted,
             "assigned": assigned,
@@ -1188,6 +1338,8 @@ def admin_overview(current_user: dict = Depends(require_admin)):
             "total_ratings": total_ratings,
             "average_rating": avg_rating,
         }
+        set_server_cached("admin_overview", res)
+        return res
     finally:
         conn.close()
 
@@ -1197,6 +1349,10 @@ def admin_overview(current_user: dict = Depends(require_admin)):
 @router.get("/departments")
 @router.get("/admin/departments")
 def list_departments(current_user: Optional[dict] = None):
+    cached = get_server_cached("departments")
+    if cached is not None:
+        return cached
+
     import json as _json
     conn = get_connection()
     try:
@@ -1208,6 +1364,7 @@ def list_departments(current_user: Optional[dict] = None):
             d["zones"]      = [z.strip() for z in (d.get("zones") or "").split(",") if z.strip()]
             d["teams"]      = _json.loads(d.get("teams") or "[]")
             result.append(d)
+        set_server_cached("departments", result)
         return result
     finally:
         conn.close()
@@ -1221,29 +1378,38 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
     Generate live, ground-truth AI Daily Civic Brief from real complaint records.
     Calculates actual counts, top workload department, urgency level, and action points.
     """
+    cached = get_server_cached("admin_ai_brief")
+    if cached is not None:
+        return cached
+
     conn = get_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) FROM complaints;").fetchone()[0]
-        high_prio = conn.execute("SELECT COUNT(*) FROM complaints WHERE UPPER(priority) IN ('HIGH', 'CRITICAL');").fetchone()[0]
-        pending = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived');").fetchone()[0]
-        resolved = conn.execute("SELECT COUNT(*) FROM complaints WHERE LOWER(status) IN ('resolved', 'closed');").fetchone()[0]
-
         now_dt = datetime.now(timezone.utc)
         today_iso = now_dt.strftime("%Y-%m-%d")
         hours24_iso = datetime.fromtimestamp(now_dt.timestamp() - 86400, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         hours48_iso = datetime.fromtimestamp(now_dt.timestamp() - 172800, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-        # Recent complaints count
-        today_cnt = conn.execute(
-            "SELECT COUNT(*) FROM complaints WHERE created_at >= ? OR created_at >= ?;",
-            (today_iso, hours24_iso),
-        ).fetchone()[0]
+        agg_row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(CASE WHEN UPPER(priority) IN ('HIGH', 'CRITICAL') THEN 1 END) AS high_prio,
+                COUNT(CASE WHEN LOWER(status) NOT IN ('resolved', 'closed', 'archived') THEN 1 END) AS pending,
+                COUNT(CASE WHEN LOWER(status) IN ('resolved', 'closed') THEN 1 END) AS resolved,
+                COUNT(CASE WHEN created_at >= ? OR created_at >= ? THEN 1 END) AS today_cnt,
+                COUNT(CASE WHEN LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND created_at <= ? THEN 1 END) AS overdue_cnt
+            FROM complaints;
+            """,
+            (today_iso, hours24_iso, hours48_iso),
+        ).fetchone()
 
-        # Overdue pending count (aged > 48 hours)
-        overdue_cnt = conn.execute(
-            "SELECT COUNT(*) FROM complaints WHERE LOWER(status) NOT IN ('resolved', 'closed', 'archived') AND created_at <= ?;",
-            (hours48_iso,),
-        ).fetchone()[0]
+        agg = dict(agg_row) if agg_row else {}
+        total = int(agg.get("total") or 0)
+        high_prio = int(agg.get("high_prio") or 0)
+        pending = int(agg.get("pending") or 0)
+        resolved = int(agg.get("resolved") or 0)
+        today_cnt = int(agg.get("today_cnt") or 0)
+        overdue_cnt = int(agg.get("overdue_cnt") or 0)
 
         by_cat_rows = conn.execute("SELECT category, COUNT(*) as cnt FROM complaints GROUP BY category ORDER BY cnt DESC;").fetchall()
         cat_counts = {r[0]: r[1] for r in by_cat_rows}
@@ -1273,7 +1439,7 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
             f"Active field resolution rate is currently {round((resolved / total * 100), 1) if total > 0 else 0}% across all wards.",
         ]
 
-        return AdminAIBriefResponse(
+        res = AdminAIBriefResponse(
             total_complaints=total,
             today_complaints=today_cnt,
             high_priority_count=high_prio,
@@ -1288,6 +1454,8 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
             category_counts=cat_counts,
             priority_counts=pri_counts,
         )
+        set_server_cached("admin_ai_brief", res)
+        return res
     finally:
         conn.close()
 
@@ -1543,6 +1711,7 @@ def execute_admin_ai_action(body: ExecuteActionRequest, current_user: dict = Dep
                     "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Assigned', ?, 'admin-ai');",
                     (cid, f"Assigned to {dept} ({officer}) via AI Operations Copilot",),
                 )
+            invalidate_server_cache()
             return {"success": True, "message": f"Successfully assigned {c['complaint_number']} to {dept}."}
 
         elif body.action_type == "escalate":
@@ -1555,6 +1724,7 @@ def execute_admin_ai_action(body: ExecuteActionRequest, current_user: dict = Dep
                     "INSERT INTO complaint_updates (complaint_id, status, message, updated_by) VALUES (?, 'Escalated', 'Priority escalated to CRITICAL via AI Operations SLA rule.', 'admin-ai');",
                     (cid,),
                 )
+            invalidate_server_cache()
             return {"success": True, "message": f"Complaint {c['complaint_number']} escalated to CRITICAL priority."}
 
         else:
@@ -1839,20 +2009,22 @@ def handle_chat(
     _, dept_name = get_department_for_category(category)
     est_sla = get_estimated_response(priority)
 
-    # Partial / broad complaints without specifics
-    if lower in ["it's about water", "water", "water problem", "water issue", "there's something wrong with the water", "something is wrong with the water"]:
-        return ChatResponse(
-            message="Sure, I can help with water issues. Is it a **water supply outage**, **pipeline leakage**, **contaminated / dirty water**, or **low pressure**?",
-            quick_replies=["Water leakage", "Dirty water", "No water supply", "Low pressure"],
-            suggest_complaint=False,
-        )
+    # Partial / broad complaints without specifics (disambiguate before filing)
+    if any(phrase in lower for phrase in ["problem with the water", "issue with the water", "something with the water", "wrong with the water", "water problem", "water issue", "about water"]) or lower in ["water", "it's about water"]:
+        if not any(k in lower for k in ["leak", "burst", "dirty", "contaminat", "outage", "supply", "pressure", "tap"]):
+            return ChatResponse(
+                message="Sure, I can help with water issues. Is it a **water supply outage**, **pipeline leakage**, **contaminated / dirty water**, or **low pressure**?",
+                quick_replies=["Water leakage", "Dirty water", "No water supply", "Low pressure"],
+                suggest_complaint=False,
+            )
 
-    if lower in ["it's about road", "road problem", "road", "roads", "pothole problem", "there's a problem with the road"]:
-        return ChatResponse(
-            message="Sure, I can help with road issues. Is it a **dangerous pothole**, **broken footpath**, **road surface damage**, or **missing divider**?",
-            quick_replies=["Dangerous pothole", "Broken footpath", "Road surface damage"],
-            suggest_complaint=False,
-        )
+    if any(phrase in lower for phrase in ["problem with the road", "issue with the road", "road problem", "road issue", "wrong with the road", "about road", "about roads"]) or lower in ["road", "roads", "it's about road"]:
+        if not any(k in lower for k in ["pothole", "broken", "footpath", "divider", "crater", "speed breaker", "damage", "crack"]):
+            return ChatResponse(
+                message="Sure, I can help with road issues. Is it a **dangerous pothole**, **broken footpath**, **road surface damage**, or **missing divider**?",
+                quick_replies=["Dangerous pothole", "Broken footpath", "Road surface damage"],
+                suggest_complaint=False,
+            )
 
     # 5. Call local LLM (Ollama) if available
     llm_resp = None

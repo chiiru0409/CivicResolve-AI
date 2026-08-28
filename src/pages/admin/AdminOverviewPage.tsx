@@ -56,24 +56,26 @@ export default function AdminOverviewPage() {
   const [brief, setBrief] = useState<AdminBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
 
-  const fetchOverview = async () => {
-    setOverviewLoading(true);
+  const fetchOverview = async (force = false) => {
+    if (!overview && !force) setOverviewLoading(true);
     setOverviewError(null);
     try {
-      const data = await api.get<AdminOverviewData>('/admin/overview');
+      const data = await api.getCached<AdminOverviewData>('/admin/overview', { forceRefresh: force, ttlMs: 10000 });
       setOverview(data);
     } catch (err) {
       console.warn('Could not load authoritative overview counts:', err);
-      setOverviewError(err instanceof Error ? err.message : 'Database overview connection error');
+      if (!overview) {
+        setOverviewError(err instanceof Error ? err.message : 'Database overview connection error');
+      }
     } finally {
       setOverviewLoading(false);
     }
   };
 
-  const fetchBrief = async () => {
-    setBriefLoading(true);
+  const fetchBrief = async (force = false) => {
+    if (!brief && !force) setBriefLoading(true);
     try {
-      const data = await api.get<AdminBrief>('/admin/ai/brief');
+      const data = await api.getCached<AdminBrief>('/admin/ai/brief', { forceRefresh: force, ttlMs: 20000 });
       setBrief(data);
     } catch (err) {
       console.warn('Could not load AI daily brief:', err);
@@ -83,12 +85,10 @@ export default function AdminOverviewPage() {
   };
 
   useEffect(() => {
-    void fetchOverview();
-    void fetchBrief();
+    void Promise.all([fetchOverview(), fetchBrief()]);
 
     const handleUpdate = () => {
-      void fetchOverview();
-      void fetchBrief();
+      void Promise.all([fetchOverview(true), fetchBrief(true)]);
     };
     window.addEventListener('complaints:updated', handleUpdate);
     return () => window.removeEventListener('complaints:updated', handleUpdate);
@@ -96,8 +96,7 @@ export default function AdminOverviewPage() {
 
   const handleRefreshAll = () => {
     void refetch();
-    void fetchOverview();
-    void fetchBrief();
+    void Promise.all([fetchOverview(true), fetchBrief(true)]);
   };
 
   const highPriorityCases = complaints.filter((c) => ['HIGH', 'CRITICAL'].includes(c.priority));
