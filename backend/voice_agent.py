@@ -234,6 +234,27 @@ def _is_cancel_intent(text: str) -> bool:
     return False
 
 
+def _is_repeat_request(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(
+        phrase in lower for phrase in [
+            "repeat", "say that again", "say again", "what did you say",
+            "pardon", "can you repeat", "could you repeat", "come again",
+            "i didn't hear", "didn't hear", "repeat please", "what was that",
+        ]
+    )
+
+
+def _is_uncertain(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(
+        phrase in lower for phrase in [
+            "maybe", "i don't know", "i dont know", "not sure", "im not sure",
+            "i'm not sure", "perhaps", "i guess", "not certain"
+        ]
+    )
+
+
 def _is_affirmative(text: str) -> bool:
     cleaned = re.sub(r"['’]", "", text.lower()).strip()
     cleaned = re.sub(r"[^\w\s]", " ", cleaned).strip()
@@ -280,6 +301,7 @@ def _extract_location_from_text(text: str) -> Optional[str]:
             if any(w in STOP_VERBS_AND_CIVIC_WORDS for w in words if w not in ["road", "street", "market", "school", "hospital", "mall", "colony", "hyderabad", "bangalore", "mumbai", "delhi", "chennai"]):
                 continue
             if len(extracted) >= 3:
+                extracted = re.sub(r"^(actually|no|it\'s|its|it is|please|sorry)\s+", "", extracted, flags=re.IGNORECASE).strip()
                 return f"{prep.title()} {extracted.title()}"
 
     # 2. Match landmark keywords directly: e.g. "MG Road", "Sector 7 Bus Stop", "Gandhi Market in Hyderabad"
@@ -288,6 +310,7 @@ def _extract_location_from_text(text: str) -> Optional[str]:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             candidate = match.group(1).strip()
+            candidate = re.sub(r"^(actually|no|it\'s|its|it is|please|sorry)\s+", "", candidate, flags=re.IGNORECASE).strip()
             clean_candidate_lower = candidate.lower().strip()
             words = clean_candidate_lower.split()
 
@@ -664,6 +687,38 @@ def process_voice_call_turn(
             },
         }
 
+    # ── 6b. Repeat Request Handling ("Repeat that", "What did you say?") ───────
+    if _is_repeat_request(msg):
+        if norm_stage in ("confirm", STATE_CONFIRM, "summary_confirmation", STATE_SUMMARY_CONFIRMATION):
+            desc = data.get("description", "your issue")
+            loc = data.get("location", "the reported location")
+            reply = f"I said: You're reporting {desc.lower()} near {loc}. Should I submit this complaint?"
+            action = "confirm"
+        elif norm_stage in ("location", STATE_LOCATION):
+            desc = data.get("description", "the issue")
+            reply = f"I asked: Where is the {desc.lower()} located?"
+            action = "speak"
+        elif norm_stage in ("landmark", STATE_LANDMARK):
+            loc = data.get("location", "that location")
+            reply = f"I asked: Is there a nearby landmark or building near {loc}?"
+            action = "speak"
+        else:
+            reply = "I said: What civic issue or complaint would you like to report or check?"
+            action = "speak"
+
+        return {
+            "reply_text": reply,
+            "stage": norm_stage,
+            "extracted_data": data,
+            "action": action,
+            "complaint": None,
+            "ui_hints": {
+                "status_label": "LISTENING",
+                "can_confirm": norm_stage in ("confirm", STATE_CONFIRM),
+                "can_cancel": bool(data),
+            },
+        }
+
     # ── 7. Status Tracking & Intent Switching with Draft Resumption ────────────
     id_match = re.search(r"CR-\d{4}-\d{4,8}", msg, re.IGNORECASE)
     is_track_intent = bool(id_match) or any(w in lower for w in [
@@ -942,7 +997,26 @@ def process_voice_call_turn(
                 },
             }
 
-        # Case C: User said No / Stop
+        # Case C: User is uncertain / needs time ("Maybe", "I don't know", "Not sure")
+        elif _is_uncertain(msg):
+            loc = data.get("location", "the reported location")
+            desc = data.get("description", "your issue")
+            return {
+                "reply_text": f"No problem, take your time. We have {desc.lower()} near {loc}. Would you like to change anything or go ahead and register it?",
+                "stage": STATE_CONFIRM,
+                "extracted_data": data,
+                "action": "confirm",
+                "complaint": None,
+                "ui_hints": {
+                    "state": SEM_SUMMARY_CONFIRMATION,
+                    "status_label": "WAITING FOR CONFIRMATION",
+                    "can_confirm": True,
+                    "can_cancel": True,
+                    "suggested_quick_replies": ["Yes, submit it", "Change details", "Cancel"],
+                },
+            }
+
+        # Case D: User explicitly said No / Stop
         elif any(w in lower.split() for w in ["no", "nope", "dont", "don't", "not", "wait", "hold"]):
             return {
                 "reply_text": "Understood. I haven't submitted anything yet. What details would you like to change?",
@@ -1054,6 +1128,27 @@ def process_voice_call_turn(
 
     # ── 13. Stage: Location Intake ─────────────────────────────────────────────
     if norm_stage in ("location", "location_collection", STATE_LOCATION):
+        if data.get("clarifying_campus"):
+            data.pop("clarifying_campus", None)
+            if any(m in lower for m in ["main road", "main", "outside", "road", "street"]):
+                data["location"] = "Main road near college"
+            else:
+                data["location"] = f"Inside campus ({msg.strip()})"
+            return {
+                "reply_text": "Got it. Do you know any nearby landmark?",
+                "stage": STATE_LANDMARK,
+                "extracted_data": data,
+                "action": "speak",
+                "complaint": None,
+                "ui_hints": {
+                    "state": SEM_LOCATION_COLLECTION,
+                    "status_label": "COLLECTING DETAILS",
+                    "can_confirm": True,
+                    "can_cancel": True,
+                    "suggested_quick_replies": ["Near City Mall", "Opposite the bus stop", "No landmark"],
+                },
+            }
+
         extracted_loc = _extract_location_from_text(msg) or msg.strip()
         data["location"] = extracted_loc
 
@@ -1202,6 +1297,24 @@ def process_voice_call_turn(
         data["landmark"] = landmark_in_msg
     if duration_in_msg:
         data["duration"] = duration_in_msg
+
+    # Special natural clarification for campus / college area
+    if any(c in lower for c in ["college", "university", "campus"]) and not any(r in lower for r in ["main road", "inside", "gate", "road"]):
+        data["clarifying_campus"] = True
+        return {
+            "reply_text": "I'm sorry about that. I can help you report it. Is it on the main road or inside the campus area?",
+            "stage": STATE_LOCATION,
+            "extracted_data": data,
+            "action": "speak",
+            "complaint": None,
+            "ui_hints": {
+                "state": SEM_CLARIFICATION,
+                "status_label": "CLARIFYING LOCATION",
+                "can_confirm": False,
+                "can_cancel": True,
+                "suggested_quick_replies": ["Main road", "Inside campus", "Near college gate"],
+            },
+        }
 
     # Case A: Location is ALREADY provided in the initial statement
     # Example: "There is a huge pothole near Gandhi Market in Hyderabad."

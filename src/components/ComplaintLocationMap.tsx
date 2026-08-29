@@ -10,6 +10,8 @@ import {
   Check,
   RotateCw,
   Maximize2,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import type { Complaint } from '../types';
 import type { Map as LeafletMap, Marker as LeafletMarker, LayerGroup } from 'leaflet';
@@ -19,6 +21,7 @@ import {
   getGoogleMapsUrl,
   getOpenStreetMapUrl,
   createTileLayerGroup,
+  GOOGLE_MAP_INTERACTION_OPTIONS,
   type MapTileMode,
 } from '../utils/mapConfig';
 
@@ -153,16 +156,11 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
         }
 
         const map = L.map(domNode, {
+          ...GOOGLE_MAP_INTERACTION_OPTIONS,
           center: [lat, lng],
           zoom: 16,
-          zoomControl: false,
           attributionControl: false,
-          fadeAnimation: true,
-          zoomAnimation: true,
         });
-
-        // Zoom control on top-right
-        L.control.zoom({ position: 'topright' }).addTo(map);
 
         // Apply clean composite tile layer group (Base + Reference labels)
         const tileGroup = createTileLayerGroup(L, tileKey);
@@ -176,6 +174,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
         buildIncidentMarker(L, lat, lng);
 
         // Re-invalidate size after layout computes
+        map.invalidateSize();
         setTimeout(() => {
           if (mapRef.current) {
             mapRef.current.invalidateSize();
@@ -206,6 +205,20 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasValidCoords, lat, lng, complaint.id]);
 
+  // Automatic ResizeObserver
+  useEffect(() => {
+    if (!containerRef.current || !mapReady) return;
+
+    const ro = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [mapReady]);
+
   // Switch Tile Layer when tileKey changes
   useEffect(() => {
     if (!mapRef.current || !leafletLibRef.current) return;
@@ -233,6 +246,14 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
     }
   };
 
+  const handleZoomIn = () => {
+    if (mapRef.current) mapRef.current.zoomIn(1);
+  };
+
+  const handleZoomOut = () => {
+    if (mapRef.current) mapRef.current.zoomOut(1);
+  };
+
   const handleCopyCoords = () => {
     if (!hasValidCoords || lat === null || lng === null) return;
     const text = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
@@ -242,7 +263,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
   };
 
   return (
-    <div className="card p-5 bg-[#0D0D0D] border-white/10 rounded-2xl space-y-4 relative overflow-hidden flex flex-col h-full shadow-2xl">
+    <div className="card p-5 bg-[#0D0D0D] border-white/10 rounded-2xl space-y-4 relative overflow-hidden flex flex-col h-full shadow-2xl select-none">
       {/* Top red telemetry speedline */}
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600]/70 to-transparent" />
 
@@ -263,9 +284,18 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
 
       {/* Map or Fallback Display */}
       {hasValidCoords && lat !== null && lng !== null ? (
-        <div className="relative rounded-xl overflow-hidden border border-white/12 flex-1 min-h-[360px] sm:min-h-[420px] bg-[#070707]">
+        <div
+          data-lenis-prevent="true"
+          onWheel={(e) => e.stopPropagation()}
+          className="relative rounded-xl overflow-hidden border border-white/12 flex-1 min-h-[360px] sm:min-h-[420px] bg-[#070707]"
+        >
           {/* Map DOM Container */}
-          <div ref={containerRef} className="w-full h-full" style={{ minHeight: 360 }} />
+          <div
+            ref={containerRef}
+            data-lenis-prevent="true"
+            className="w-full h-full"
+            style={{ minHeight: 360 }}
+          />
 
           {/* Map Controls: Tile Switcher */}
           <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 bg-[#0F0F0F]/90 backdrop-blur-md border border-white/15 rounded-xl p-1 shadow-2xl">
@@ -274,7 +304,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
                 key={key}
                 type="button"
                 onClick={() => setTileKey(key)}
-                className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all duration-150 ${
+                className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all duration-150 font-mono ${
                   tileKey === key
                     ? 'bg-[#E10600] text-white shadow-md'
                     : 'text-white/50 hover:text-white hover:bg-white/8'
@@ -285,16 +315,31 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
             ))}
           </div>
 
-          {/* Recenter & External Tools Bar */}
-          <div className="absolute bottom-3 right-3 z-[1000] flex items-center gap-2">
+          {/* Floating Zoom & Recenter Controls (Top Right) */}
+          <div className="absolute top-3 right-3 z-[1000] flex flex-col bg-black/85 backdrop-blur-md border border-white/15 rounded-xl overflow-hidden shadow-2xl divide-y divide-white/10">
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="p-2 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Zoom In"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="p-2 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Zoom Out"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
             <button
               type="button"
               onClick={handleRecenter}
-              className="flex items-center gap-1.5 bg-[#0F0F0F]/95 hover:bg-[#1A1A1A] text-white text-xs font-bold px-3 py-1.5 rounded-xl border border-white/15 backdrop-blur-md shadow-xl transition-all active:scale-95"
-              title="Recenter Map on Incident Coordinates"
+              className="p-2 text-white/70 hover:text-[#E10600] hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Recenter on Incident"
             >
-              <Compass className="w-3.5 h-3.5 text-[#E10600]" />
-              Recenter
+              <Compass className="w-3.5 h-3.5" />
             </button>
           </div>
 

@@ -67,6 +67,27 @@ export const MAP_TILE_CONFIG: Record<MapTileMode, TileLayerDef> = {
 };
 
 /**
+ * Standard Google-Maps-grade Leaflet map interaction configuration options.
+ */
+export const GOOGLE_MAP_INTERACTION_OPTIONS: L.MapOptions = {
+  zoomControl: false,       // custom modern controls placed explicitly
+  attributionControl: true,
+  fadeAnimation: true,
+  zoomAnimation: true,
+  scrollWheelZoom: true,
+  wheelDebounceTime: 40,
+  wheelPxPerZoomLevel: 60,
+  doubleClickZoom: true,
+  touchZoom: true,
+  dragging: true,
+  boxZoom: true,
+  keyboard: true,
+  zoomSnap: 0.5,
+  zoomDelta: 0.5,
+  trackResize: true,
+};
+
+/**
  * Strict geographic coordinate validation.
  * Verifies that latitude is in [-90, 90], longitude is in [-180, 180],
  * neither is NaN or null/undefined, and (0,0) is excluded as absent coordinates.
@@ -125,6 +146,23 @@ export function formatCoordinatesDMS(lat: number, lng: number, precision: number
 }
 
 /**
+ * Calculate Haversine distance in kilometers between two geographic coordinates.
+ */
+export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth's radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
  * External navigation URL builders
  */
 export function getGoogleMapsUrl(lat: number, lng: number): string {
@@ -168,4 +206,37 @@ export function createTileLayerGroup(
   }
 
   return group;
+}
+
+// ── Geocoding cache ────────────────────────────────────────────────────────────
+const _GEO_CACHE = new Map<string, string>();
+const NOM_BASE = 'https://nominatim.openstreetmap.org';
+
+/**
+ * Reverse geocode latitude and longitude to address.
+ */
+export async function reverseGeocodeAddress(lat: number, lng: number): Promise<string> {
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  if (_GEO_CACHE.has(key)) return _GEO_CACHE.get(key)!;
+
+  try {
+    const res = await fetch(
+      `${NOM_BASE}/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=en`,
+      { headers: { 'Accept-Language': 'en', 'User-Agent': 'CivicResolveAI/1.0' } }
+    );
+    if (!res.ok) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const data = await res.json();
+    const d = data.address ?? {};
+    const parts = [
+      d.road || d.pedestrian || d.footway,
+      d.neighbourhood || d.suburb || d.village,
+      d.city || d.town || d.county,
+      d.state,
+    ].filter(Boolean);
+    const result = parts.length > 0 ? parts.join(', ') : data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    _GEO_CACHE.set(key, result);
+    return result;
+  } catch {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
 }

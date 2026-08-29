@@ -1,18 +1,19 @@
 /**
- * MapView.tsx — Interactive multi-complaint incident map using Leaflet.
+ * MapView.tsx — Interactive multi-complaint incident map with Google Maps-grade usability.
  *
  * Features:
- * - Plots real verified complaint coordinates from municipal database
+ * - Google Maps-grade smooth mouse-wheel zoom, double-click zoom, touch/pinch zoom, pan, and drag
  * - Zero watermark, zero-API-key tile layers (Dark Tactical, Satellite, Street)
- * - Color-coded priority markers with active beacon animations
- * - Incident drill-down popup & card with direct link to details
- * - Auto-fits bounds to current active filtered complaints
- * - Category and Priority filters
+ * - Custom Google Maps-style Zoom In (+), Zoom Out (-), Locate Me (GPS), and Fit View controls
+ * - Color-coded priority markers with pulsating beacon animations
+ * - Live ResizeObserver for automatic map size invalidation on window/container resize
+ * - Isolated wheel events (data-lenis-prevent) to prevent page scrolling during map zoom
+ * - Incident drill-down card with live DMS coordinates and direct deep navigation links
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import type { Map as LeafletMap, Marker as LeafletMarker, LayerGroup } from 'leaflet';
+import type { Map as LeafletMap, Marker as LeafletMarker, LayerGroup, Circle as LeafletCircle } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { MapMarker, Complaint } from '../types';
 import PriorityBadge from './PriorityBadge';
@@ -27,12 +28,17 @@ import {
   RefreshCw,
   Compass,
   ExternalLink,
+  Plus,
+  Minus,
+  Navigation,
+  Loader2,
 } from 'lucide-react';
 import {
   validateCoordinates,
   formatCoordinatesDMS,
   getGoogleMapsUrl,
   createTileLayerGroup,
+  GOOGLE_MAP_INTERACTION_OPTIONS,
   type MapTileMode,
 } from '../utils/mapConfig';
 
@@ -66,6 +72,20 @@ function buildMarkerIcon(L: typeof import('leaflet'), color: string, pulse: bool
   });
 }
 
+function buildUserLocationIcon(L: typeof import('leaflet')) {
+  const svg = `
+    <div style="position:relative;width:32px;height:32px;">
+      <div style="position:absolute;inset:0;border-radius:50%;background:#38BDF8;opacity:0.35;animation:civicUserPulse 1.8s ease-out infinite;"></div>
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#38BDF8;border:3px solid #ffffff;box-shadow:0 0 10px rgba(56,189,248,0.8);"></div>
+    </div>`;
+  return L.divIcon({
+    html: svg,
+    className: 'civic-user-marker',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+}
+
 interface MapViewProps {
   markers: MapMarker[];
   complaints: Complaint[];
@@ -85,6 +105,8 @@ const MapView: React.FC<MapViewProps> = ({
   const mapRef = useRef<LeafletMap | null>(null);
   const tileGroupRef = useRef<LayerGroup | null>(null);
   const markersRef = useRef<LeafletMarker[]>([]);
+  const userMarkerRef = useRef<LeafletMarker | null>(null);
+  const userCircleRef = useRef<LeafletCircle | null>(null);
   const leafletLibRef = useRef<typeof import('leaflet') | null>(null);
 
   const [tileKey, setTileKey] = useState<MapTileMode>('dark');
@@ -92,6 +114,8 @@ const MapView: React.FC<MapViewProps> = ({
   const [filter, setFilter] = useState<'all' | 'HIGH' | 'MEDIUM' | 'LOW'>('all');
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(zoom);
 
   // Initialize Map
   useEffect(() => {
@@ -124,15 +148,15 @@ const MapView: React.FC<MapViewProps> = ({
         }
 
         const map = L.map(domNode, {
+          ...GOOGLE_MAP_INTERACTION_OPTIONS,
           center,
           zoom,
-          zoomControl: false,
-          attributionControl: true,
-          fadeAnimation: true,
-          zoomAnimation: true,
         });
 
-        L.control.zoom({ position: 'topright' }).addTo(map);
+        // Track zoom level changes for interactive UI
+        map.on('zoomend', () => {
+          setCurrentZoom(Math.round(map.getZoom() * 10) / 10);
+        });
 
         // Composite tile layer group
         const tileGroup = createTileLayerGroup(L, 'dark');
@@ -143,6 +167,8 @@ const MapView: React.FC<MapViewProps> = ({
         setMapReady(true);
         setMapError(null);
 
+        // Immediate + staggered resize invalidation
+        map.invalidateSize();
         setTimeout(() => {
           if (mapRef.current) {
             mapRef.current.invalidateSize();
@@ -166,10 +192,26 @@ const MapView: React.FC<MapViewProps> = ({
           // ignore
         }
         mapRef.current = null;
+        userMarkerRef.current = null;
+        userCircleRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Automatic ResizeObserver to ensure map never has layout/blank tile glitches
+  useEffect(() => {
+    if (!containerRef.current || !mapReady) return;
+
+    const ro = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [mapReady]);
 
   // Swap tile layer when user changes style
   useEffect(() => {
@@ -243,6 +285,60 @@ const MapView: React.FC<MapViewProps> = ({
   }).length;
   const missingCoordsCount = filteredCount - withCoordsCount;
 
+  // Zoom In / Out Handlers
+  const handleZoomIn = () => {
+    if (mapRef.current) {
+      mapRef.current.zoomIn(1);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (mapRef.current) {
+      mapRef.current.zoomOut(1);
+    }
+  };
+
+  // Locate Me (Current GPS location)
+  const handleLocateMe = () => {
+    if (!navigator.geolocation || !mapRef.current || !leafletLibRef.current) return;
+    setGpsLoading(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+        setGpsLoading(false);
+        const map = mapRef.current;
+        const L = leafletLibRef.current;
+        if (!map || !L) return;
+
+        // Clean up previous user markers
+        if (userMarkerRef.current) userMarkerRef.current.remove();
+        if (userCircleRef.current) userCircleRef.current.remove();
+
+        const userIcon = buildUserLocationIcon(L);
+        const userMarker = L.marker([lat, lng], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
+        userMarkerRef.current = userMarker;
+
+        if (accuracy && accuracy < 500) {
+          const userCircle = L.circle([lat, lng], {
+            radius: accuracy,
+            color: '#38BDF8',
+            fillColor: '#38BDF8',
+            fillOpacity: 0.12,
+            weight: 1,
+          }).addTo(map);
+          userCircleRef.current = userCircle;
+        }
+
+        map.flyTo([lat, lng], 16, { duration: 1.2 });
+      },
+      () => {
+        setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
   const handleFitAll = () => {
     if (!mapRef.current) return;
     const validCoords = complaints
@@ -259,11 +355,18 @@ const MapView: React.FC<MapViewProps> = ({
 
   return (
     <div
-      className="relative w-full rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#0A0A0A]"
+      data-lenis-prevent="true"
+      onWheel={(e) => e.stopPropagation()}
+      className="relative w-full rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#0A0A0A] select-none"
       style={{ height }}
     >
       {/* Map DOM container */}
-      <div ref={containerRef} className="w-full h-full" style={{ minHeight: 400 }} />
+      <div
+        ref={containerRef}
+        data-lenis-prevent="true"
+        className="w-full h-full"
+        style={{ minHeight: 400 }}
+      />
 
       {/* Loading state */}
       {!mapReady && !mapError && (
@@ -311,20 +414,21 @@ const MapView: React.FC<MapViewProps> = ({
         </div>
       )}
 
-      {/* Tile Switcher & Controls */}
+      {/* Google-Maps-Style Floating Controls (Top Right) */}
       {mapReady && (
-        <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2 items-end" style={{ marginTop: 45 }}>
-          <div className="flex flex-col gap-1 bg-black/80 backdrop-blur-md border border-white/15 rounded-xl p-1.5 shadow-2xl">
-            <div className="flex items-center gap-1.5 px-1.5 py-1 text-[10px] text-white/40 font-bold uppercase tracking-wider">
+        <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2 items-end">
+          {/* Map Layer Mode Switcher */}
+          <div className="flex flex-col gap-1 bg-black/85 backdrop-blur-md border border-white/15 rounded-xl p-1.5 shadow-2xl">
+            <div className="flex items-center gap-1.5 px-1.5 py-1 text-[10px] text-white/40 font-bold uppercase tracking-wider font-mono">
               <Layers className="w-3 h-3" /> Map Mode
             </div>
             {(['dark', 'satellite', 'street'] as MapTileMode[]).map((key) => (
               <button
                 key={key}
                 onClick={() => setTileKey(key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-left uppercase ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-left uppercase font-mono ${
                   tileKey === key
-                    ? 'bg-[#E10600] text-white'
+                    ? 'bg-[#E10600] text-white shadow-md'
                     : 'text-white/50 hover:text-white hover:bg-white/8'
                 }`}
               >
@@ -333,13 +437,51 @@ const MapView: React.FC<MapViewProps> = ({
             ))}
           </div>
 
-          <button
-            onClick={handleFitAll}
-            className="flex items-center gap-1.5 bg-black/80 hover:bg-black text-white text-xs font-bold px-3 py-2 rounded-xl border border-white/15 backdrop-blur-md shadow-xl transition-all"
-            title="Fit all markers in view"
-          >
-            <Compass className="w-3.5 h-3.5 text-[#E10600]" /> Fit View
-          </button>
+          {/* Navigation & Zoom Control Stack */}
+          <div className="flex flex-col bg-black/85 backdrop-blur-md border border-white/15 rounded-xl overflow-hidden shadow-2xl divide-y divide-white/10">
+            {/* Zoom In */}
+            <button
+              onClick={handleZoomIn}
+              className="p-2.5 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Zoom In"
+              aria-label="Zoom In"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+
+            {/* Zoom Out */}
+            <button
+              onClick={handleZoomOut}
+              className="p-2.5 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Zoom Out"
+              aria-label="Zoom Out"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+
+            {/* Locate Me (GPS) */}
+            <button
+              onClick={handleLocateMe}
+              disabled={gpsLoading}
+              className={`p-2.5 transition-colors flex items-center justify-center active:scale-95 ${
+                gpsLoading ? 'text-[#38BDF8] animate-pulse' : 'text-white/70 hover:text-[#38BDF8] hover:bg-white/10'
+              }`}
+              title="Your Location (GPS)"
+              aria-label="Your Location"
+            >
+              {gpsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
+            </button>
+
+            {/* Fit View Bounds */}
+            <button
+              onClick={handleFitAll}
+              className="p-2.5 text-white/70 hover:text-[#E10600] hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Fit all markers in view"
+              aria-label="Fit View"
+            >
+              <Compass className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -396,7 +538,7 @@ const MapView: React.FC<MapViewProps> = ({
                 }
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/50 hover:text-white transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/50 hover:text-white transition-colors font-mono"
               >
                 Google Maps <ExternalLink className="w-3 h-3" />
               </a>
@@ -406,7 +548,7 @@ const MapView: React.FC<MapViewProps> = ({
                     ? `/admin/complaints/${selected.id}`
                     : `/track?id=${selected.id}`
                 }
-                className="inline-flex items-center gap-1 text-xs font-bold text-[#E10600] hover:text-white hover:bg-[#E10600] px-3 py-1.5 rounded-lg bg-[#E10600]/10 transition-all"
+                className="inline-flex items-center gap-1 text-xs font-bold text-[#E10600] hover:text-white hover:bg-[#E10600] px-3 py-1.5 rounded-lg bg-[#E10600]/10 transition-all font-mono"
               >
                 View Incident <ArrowRight className="w-3 h-3" />
               </Link>
@@ -418,11 +560,11 @@ const MapView: React.FC<MapViewProps> = ({
       {/* Mapped Count Telemetry Badge */}
       {mapReady && (
         <div className="absolute bottom-4 right-4 z-[1000] flex flex-col items-end gap-1.5 pointer-events-none">
-          <div className="bg-black/80 backdrop-blur-md border border-white/15 rounded-full px-3 py-1.5 text-xs text-white/60 font-semibold shadow-lg">
+          <div className="bg-black/80 backdrop-blur-md border border-white/15 rounded-full px-3 py-1.5 text-xs text-white/60 font-semibold shadow-lg font-mono">
             {withCoordsCount} mapped · {filteredCount} total
           </div>
           {missingCoordsCount > 0 && (
-            <div className="bg-[#FFC400]/10 backdrop-blur-md border border-[#FFC400]/30 rounded-full px-3 py-1 text-[10px] text-[#FFC400] font-medium shadow-lg">
+            <div className="bg-[#FFC400]/10 backdrop-blur-md border border-[#FFC400]/30 rounded-full px-3 py-1 text-[10px] text-[#FFC400] font-medium shadow-lg font-mono">
               {missingCoordsCount} without GPS coordinates
             </div>
           )}
@@ -434,22 +576,17 @@ const MapView: React.FC<MapViewProps> = ({
           from { opacity:0; transform: translateX(-50%) translateY(10px); }
           to   { opacity:1; transform: translateX(-50%) translateY(0); }
         }
+        @keyframes civicUserPulse {
+          0%   { transform: scale(0.9); opacity: 0.6; }
+          100% { transform: scale(2.2); opacity: 0; }
+        }
         .leaflet-control-attribution {
           background: rgba(0,0,0,0.7) !important;
           color: #777 !important;
           font-size: 10px !important;
         }
         .leaflet-control-attribution a { color: #999 !important; }
-        .leaflet-control-zoom a {
-          background: rgba(15,15,15,0.9) !important;
-          color: #ccc !important;
-          border-color: rgba(255,255,255,0.12) !important;
-        }
-        .leaflet-control-zoom a:hover {
-          background: rgba(225,6,0,0.85) !important;
-          color: white !important;
-        }
-        .civic-marker-div {
+        .civic-marker-div, .civic-user-marker {
           background: transparent !important;
           border: none !important;
         }

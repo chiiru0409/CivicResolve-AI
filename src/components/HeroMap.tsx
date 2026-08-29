@@ -132,9 +132,13 @@ const HeroMap: React.FC = () => {
   }, [incidents]);
 
   return (
-    <div className="relative w-full h-full min-h-[340px] rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#0A0A0A]">
+    <div
+      data-lenis-prevent="true"
+      onWheel={(e) => e.stopPropagation()}
+      className="relative w-full h-full min-h-[340px] rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#0A0A0A] select-none"
+    >
       {/* Leaflet container */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} data-lenis-prevent="true" className="w-full h-full" />
 
       {/* Loading state */}
       {!ready && (

@@ -1461,6 +1461,7 @@ def get_admin_ai_brief(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/admin/ai/assistant", response_model=AdminAIQueryResponse)
+@router.post("/admin/ai/copilot", response_model=AdminAIQueryResponse)
 def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depends(require_admin)):
     """
     Dedicated AI Intelligence Copilot for administrators.
@@ -1470,8 +1471,8 @@ def handle_admin_ai_query(body: AdminAIQueryRequest, current_user: dict = Depend
     try:
         q = body.query.strip().lower()
 
-        # 1. High priority / urgent queries
-        if any(w in q for w in ["high priority", "urgent", "critical", "immediate", "highest priority", "attention"]):
+        # 1. High priority / urgent queries / recommendations ("What should I handle first?")
+        if any(w in q for w in ["high priority", "urgent", "critical", "immediate", "highest priority", "attention", "handle first", "what first", "serious", "severe", "recommend", "priorit"]):
             rows = conn.execute(
                 """
                 SELECT id, complaint_number, title, category, priority, status, department, location, created_at

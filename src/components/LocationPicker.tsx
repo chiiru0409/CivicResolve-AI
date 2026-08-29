@@ -1,15 +1,16 @@
 /**
  * LocationPicker.tsx
  *
- * Citizen location selection for complaint reporting.
+ * Citizen location selection for complaint reporting with Google-Maps-grade interactivity.
  *
  * Features:
- * - Use Current Location (GPS) → map centres on device position
- * - Interactive Leaflet map with draggable precision pin
- * - Zero watermark, zero-API-key tile layer
+ * - Use Current Location (GPS) → map centres on device position with precision beacon
+ * - Interactive Leaflet map with smooth wheel zoom, touch pinch, and draggable precision pin
+ * - Zero watermark, zero-API-key tile layers (Dark Tactical, Satellite, Street)
  * - Real-time Reverse geocoding (Nominatim OpenStreetMap)
- * - Address search with live suggestions
- * - Strict coordinate validation
+ * - Address search with live suggestions and instant flyTo animation
+ * - Wheel event isolation (data-lenis-prevent) to prevent page scrolling while zooming
+ * - Live ResizeObserver to ensure map container never renders partial tiles
  * - Clear GPS accuracy status indicator
  */
 
@@ -22,11 +23,15 @@ import {
   Loader2,
   X,
   AlertCircle,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import {
   validateCoordinates,
   createTileLayerGroup,
+  GOOGLE_MAP_INTERACTION_OPTIONS,
+  reverseGeocodeAddress,
 } from '../utils/mapConfig';
 
 export interface PickedLocation {
@@ -42,29 +47,7 @@ interface LocationPickerProps {
   initialLocation?: PickedLocation;
 }
 
-// ── Nominatim helpers (OpenStreetMap geocoding — free, public) ─────────────────
 const NOM_BASE = 'https://nominatim.openstreetmap.org';
-
-async function reverseGeocode(lat: number, lng: number): Promise<string> {
-  try {
-    const res = await fetch(
-      `${NOM_BASE}/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=en`,
-      { headers: { 'Accept-Language': 'en', 'User-Agent': 'CivicResolveAI/1.0' } }
-    );
-    if (!res.ok) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    const data = await res.json();
-    const d = data.address ?? {};
-    const parts = [
-      d.road || d.pedestrian || d.footway,
-      d.neighbourhood || d.suburb || d.village,
-      d.city || d.town || d.county,
-      d.state,
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join(', ') : data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  } catch {
-    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  }
-}
 
 async function searchAddress(query: string): Promise<Array<{ display_name: string; lat: string; lon: string }>> {
   try {
@@ -130,7 +113,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
 
     if (!skipRev) {
       setRevLoading(true);
-      const addr = await reverseGeocode(cleanLat, cleanLng);
+      const addr = await reverseGeocodeAddress(cleanLat, cleanLng);
       setAddress(addr);
       setRevLoading(false);
     }
@@ -154,13 +137,11 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       }
 
       const map = L.map(domNode, {
+        ...GOOGLE_MAP_INTERACTION_OPTIONS,
         center: [DEFAULT_LAT, DEFAULT_LNG],
         zoom: DEFAULT_ZOOM,
-        zoomControl: false,
         attributionControl: false,
       });
-
-      L.control.zoom({ position: 'topright' }).addTo(map);
 
       // Add zero-watermark dark tactical composite layer
       const tileGroup = createTileLayerGroup(L, 'dark');
@@ -199,9 +180,14 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       leafletRef.current = L;
       setMapReady(true);
 
+      map.invalidateSize();
+      setTimeout(() => {
+        if (mapRef.current) mapRef.current.invalidateSize();
+      }, 150);
+
       // Reverse geocode initial position if needed
       if (!initialLocation?.address) {
-        reverseGeocode(DEFAULT_LAT, DEFAULT_LNG).then(setAddress);
+        reverseGeocodeAddress(DEFAULT_LAT, DEFAULT_LNG).then(setAddress);
       }
     });
 
@@ -213,6 +199,20 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ResizeObserver for clean rendering
+  useEffect(() => {
+    if (!containerRef.current || !mapReady) return;
+
+    const ro = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [mapReady]);
 
   // GPS handler
   const handleGps = () => {
@@ -227,7 +227,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
         const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords;
         setAccuracy(acc);
         setGpsLoading(false);
-        if (mapRef.current) mapRef.current.setView([lat, lng], 17);
+        if (mapRef.current) mapRef.current.flyTo([lat, lng], 17, { duration: 1.2 });
         await moveMarkerTo(lat, lng);
       },
       (err) => {
@@ -259,8 +259,17 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
     const lng = parseFloat(result.lon);
     setShowResults(false);
     setSearchQuery('');
-    if (mapRef.current) mapRef.current.setView([lat, lng], 16);
+    if (mapRef.current) mapRef.current.flyTo([lat, lng], 16, { duration: 1.2 });
     await moveMarkerTo(lat, lng);
+  };
+
+  // Zoom handlers
+  const handleZoomIn = () => {
+    if (mapRef.current) mapRef.current.zoomIn(1);
+  };
+
+  const handleZoomOut = () => {
+    if (mapRef.current) mapRef.current.zoomOut(1);
   };
 
   // Confirm
@@ -272,7 +281,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   const accuracyOk = !accuracy || accuracy <= 100;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 select-none">
       {/* GPS button */}
       <button
         type="button"
@@ -281,7 +290,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
         className={`w-full flex items-center justify-center gap-2 font-bold py-3 rounded-xl border transition-all ${
           gpsLoading
             ? 'bg-white/5 border-white/10 text-white/40 cursor-not-allowed'
-            : 'bg-[#E10600]/10 hover:bg-[#E10600]/20 border-[#E10600]/30 text-[#E10600]'
+            : 'bg-[#E10600]/10 hover:bg-[#E10600]/20 border-[#E10600]/30 text-[#E10600] active:scale-[0.99]'
         }`}
       >
         {gpsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
@@ -357,12 +366,43 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       </div>
 
       {/* Leaflet map */}
-      <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-lg bg-[#0D0D0D]" style={{ height: 280 }}>
-        <div ref={containerRef} className="w-full h-full" />
+      <div
+        data-lenis-prevent="true"
+        onWheel={(e) => e.stopPropagation()}
+        className="relative rounded-2xl overflow-hidden border border-white/10 shadow-lg bg-[#0D0D0D]"
+        style={{ height: 280 }}
+      >
+        <div
+          ref={containerRef}
+          data-lenis-prevent="true"
+          className="w-full h-full"
+        />
+
+        {/* Floating Zoom Controls (Top Right) */}
+        {mapReady && (
+          <div className="absolute top-3 right-3 z-[1000] flex flex-col bg-black/85 backdrop-blur-md border border-white/15 rounded-xl overflow-hidden shadow-xl divide-y divide-white/10">
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="p-2 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Zoom In"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="p-2 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center active:scale-95"
+              title="Zoom Out"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Loading overlay */}
         {!mapReady && (
-          <div className="absolute inset-0 bg-[#0D0D0D] flex items-center justify-center">
+          <div className="absolute inset-0 bg-[#0D0D0D] flex items-center justify-center z-[1001]">
             <div className="w-8 h-8 border-2 border-[#E10600]/20 border-t-[#E10600] rounded-full animate-spin" />
           </div>
         )}

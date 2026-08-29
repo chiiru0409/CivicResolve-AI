@@ -36,6 +36,13 @@ export default function SmoothScroll({ children }: { children: React.ReactNode }
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       orientation: 'vertical',
       smoothWheel: true,
+      prevent: (node: HTMLElement) => {
+        return (
+          node.classList?.contains('leaflet-container') ||
+          node.hasAttribute?.('data-lenis-prevent') ||
+          Boolean(node.closest?.('.leaflet-container, [data-lenis-prevent]'))
+        );
+      },
     });
     lenisRef.current = lenis;
 
