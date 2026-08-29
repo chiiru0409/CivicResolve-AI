@@ -27,7 +27,7 @@ export function useLeafletMap(
   const {
     center = [20.5937, 78.9629], // India centre
     zoom = 5,
-    style = 'dark',
+    style = 'street',
   } = options;
 
   useEffect(() => {

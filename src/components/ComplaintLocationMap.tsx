@@ -43,7 +43,8 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
   const tileGroupRef = useRef<LayerGroup | null>(null);
   const leafletLibRef = useRef<typeof import('leaflet') | null>(null);
 
-  const [tileKey, setTileKey] = useState<MapTileMode>('dark');
+  const [tileKey, setTileKey] = useState<MapTileMode>('street');
+  const activeTileKeyRef = useRef<MapTileMode>('street');
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -162,10 +163,11 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
           attributionControl: false,
         });
 
-        // Apply clean composite tile layer group (Base + Reference labels)
-        const tileGroup = createTileLayerGroup(L, tileKey);
+        // Apply clean composite tile layer group (Default STREET mode)
+        const tileGroup = createTileLayerGroup(L, 'street');
         tileGroup.addTo(map);
         tileGroupRef.current = tileGroup;
+        activeTileKeyRef.current = 'street';
 
         mapRef.current = map;
         setMapReady(true);
@@ -179,12 +181,12 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
           if (mapRef.current) {
             mapRef.current.invalidateSize();
           }
-        }, 150);
+        }, 100);
       })
       .catch((err) => {
         console.error('[ComplaintLocationMap] Error initializing Leaflet:', err);
         if (isMounted) {
-          setMapError('Failed to initialize GIS engine. You can still navigate via external maps.');
+          setMapError('Failed to load incident map.');
           setMapReady(false);
         }
       });
@@ -222,6 +224,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
   // Switch Tile Layer when tileKey changes
   useEffect(() => {
     if (!mapRef.current || !leafletLibRef.current) return;
+    if (activeTileKeyRef.current === tileKey && tileGroupRef.current) return;
     const L = leafletLibRef.current;
 
     if (tileGroupRef.current) {
@@ -231,6 +234,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
     const newGroup = createTileLayerGroup(L, tileKey);
     newGroup.addTo(mapRef.current);
     tileGroupRef.current = newGroup;
+    activeTileKeyRef.current = tileKey;
   }, [tileKey]);
 
   // Recenter handler
@@ -299,7 +303,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
 
           {/* Map Controls: Tile Switcher */}
           <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 bg-[#0F0F0F]/90 backdrop-blur-md border border-white/15 rounded-xl p-1 shadow-2xl">
-            {(['dark', 'satellite', 'street'] as MapTileMode[]).map((key) => (
+            {(['street', 'dark', 'satellite'] as MapTileMode[]).map((key) => (
               <button
                 key={key}
                 type="button"
@@ -310,7 +314,7 @@ const ComplaintLocationMap: React.FC<ComplaintLocationMapProps> = ({ complaint }
                     : 'text-white/50 hover:text-white hover:bg-white/8'
                 }`}
               >
-                {key === 'dark' ? 'Dark' : key === 'satellite' ? 'Satellite' : 'Street'}
+                {key === 'street' ? 'Street' : key === 'dark' ? 'Dark' : 'Satellite'}
               </button>
             ))}
           </div>

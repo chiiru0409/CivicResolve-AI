@@ -143,8 +143,8 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
         attributionControl: false,
       });
 
-      // Add zero-watermark dark tactical composite layer
-      const tileGroup = createTileLayerGroup(L, 'dark');
+      // Add street network composite layer
+      const tileGroup = createTileLayerGroup(L, 'street');
       tileGroup.addTo(map);
 
       // Custom draggable glowing pin

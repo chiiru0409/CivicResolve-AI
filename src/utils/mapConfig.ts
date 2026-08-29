@@ -29,7 +29,18 @@ export interface TileLayerDef {
   };
 }
 
+export const DEFAULT_MAP_MODE: MapTileMode = 'street';
+
 export const MAP_TILE_CONFIG: Record<MapTileMode, TileLayerDef> = {
+  street: {
+    label: 'Street Network',
+    base: {
+      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+      subdomains: 'abc',
+    },
+  },
   dark: {
     label: 'Dark Tactical',
     base: {
@@ -53,14 +64,6 @@ export const MAP_TILE_CONFIG: Record<MapTileMode, TileLayerDef> = {
     reference: {
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
       attribution: '',
-      maxZoom: 19,
-    },
-  },
-  street: {
-    label: 'Street Network',
-    base: {
-      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
       maxZoom: 19,
     },
   },
@@ -182,9 +185,9 @@ export function getOpenStreetMapUrl(lat: number, lng: number, zoom: number = 17)
  */
 export function createTileLayerGroup(
   leaflet: typeof import('leaflet'),
-  mode: MapTileMode,
+  mode: MapTileMode = DEFAULT_MAP_MODE,
 ): L.LayerGroup {
-  const cfg = MAP_TILE_CONFIG[mode] || MAP_TILE_CONFIG.dark;
+  const cfg = MAP_TILE_CONFIG[mode] || MAP_TILE_CONFIG.street;
   const group = leaflet.layerGroup();
 
   const baseLayer = leaflet.tileLayer(cfg.base.url, {
@@ -192,6 +195,9 @@ export function createTileLayerGroup(
     maxZoom: cfg.base.maxZoom,
     subdomains: cfg.base.subdomains || 'abc',
     crossOrigin: true,
+    keepBuffer: 4,
+    updateWhenIdle: false,
+    updateWhenZooming: false,
   });
   group.addLayer(baseLayer);
 
@@ -201,6 +207,9 @@ export function createTileLayerGroup(
       maxZoom: cfg.reference.maxZoom,
       subdomains: cfg.reference.subdomains || 'abc',
       crossOrigin: true,
+      keepBuffer: 4,
+      updateWhenIdle: false,
+      updateWhenZooming: false,
     });
     group.addLayer(refLayer);
   }

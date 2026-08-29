@@ -26,27 +26,33 @@ function buildMarkers(complaints: Complaint[]): MapMarker[] {
 
 export default function AdminMapPage() {
   const { complaints, loading, error, refetch } = useAdminComplaints();
-  const markers = buildMarkers(complaints);
+  const markers = React.useMemo(() => buildMarkers(complaints), [complaints]);
 
   const high     = complaints.filter((c) => ['HIGH','CRITICAL'].includes(c.priority)).length;
   const resolved = complaints.filter((c) => ['Resolved','Closed'].includes(c.status)).length;
   const active   = complaints.filter((c) => !['Resolved','Closed'].includes(c.status)).length;
 
   // Only complaints with mathematically valid coordinates will appear on the map
-  const validCoordsList = complaints
-    .map((c) => ({ complaint: c, ...validateCoordinates(c.latitude, c.longitude) }))
-    .filter((item) => item.valid && item.latitude !== null && item.longitude !== null);
+  const validCoordsList = React.useMemo(
+    () =>
+      complaints
+        .map((c) => ({ complaint: c, ...validateCoordinates(c.latitude, c.longitude) }))
+        .filter((item) => item.valid && item.latitude !== null && item.longitude !== null),
+    [complaints],
+  );
 
   const withCoordsCount = validCoordsList.length;
   const missingCoords = complaints.length - withCoordsCount;
 
   // Auto-compute centre from real complaint coordinates
-  let mapCenter: [number, number] = [17.3850, 78.4867];
-  if (validCoordsList.length > 0) {
-    const avgLat = validCoordsList.reduce((s, c) => s + c.latitude!, 0) / validCoordsList.length;
-    const avgLng = validCoordsList.reduce((s, c) => s + c.longitude!, 0) / validCoordsList.length;
-    mapCenter = [avgLat, avgLng];
-  }
+  const mapCenter: [number, number] = React.useMemo(() => {
+    if (validCoordsList.length > 0) {
+      const avgLat = validCoordsList.reduce((s, c) => s + c.latitude!, 0) / validCoordsList.length;
+      const avgLng = validCoordsList.reduce((s, c) => s + c.longitude!, 0) / validCoordsList.length;
+      return [avgLat, avgLng];
+    }
+    return [17.3850, 78.4867];
+  }, [validCoordsList]);
 
   return (
     <PageTransition className="p-6 flex flex-col gap-5" style={{ height: 'calc(100vh - 56px)' }}>

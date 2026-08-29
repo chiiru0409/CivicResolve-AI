@@ -20,9 +20,12 @@ interface MapIncident {
 const HeroMap: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import('leaflet').Map | null>(null);
+  const markerGroupRef = useRef<import('leaflet').LayerGroup | null>(null);
+  const leafletLibRef = useRef<typeof import('leaflet') | null>(null);
   const [ready, setReady] = useState(false);
   const [incidents, setIncidents] = useState<MapIncident[]>([]);
 
+  // Fetch incidents in parallel with map initialization
   useEffect(() => {
     let isMounted = true;
     getPublicMapIncidents()
@@ -37,6 +40,7 @@ const HeroMap: React.FC = () => {
     };
   }, []);
 
+  // Initialize Leaflet map and STREET tile layer immediately on mount
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -44,14 +48,11 @@ const HeroMap: React.FC = () => {
 
     import('leaflet').then((L) => {
       if (!isMounted || !containerRef.current || mapRef.current) return;
+      leafletLibRef.current = L;
 
+      // Reset default icons
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (L.Icon.Default.prototype as any)._getIconUrl;
-
-      const validList = incidents.filter((p) => validateCoordinates(p.latitude, p.longitude).valid);
-
-      const defaultCenter: [number, number] =
-        validList.length > 0 ? [validList[0].latitude, validList[0].longitude] : [20.5937, 78.9629];
 
       const domNode = containerRef.current;
       if ((domNode as unknown as { _leaflet_id?: unknown })._leaflet_id) {
@@ -59,8 +60,8 @@ const HeroMap: React.FC = () => {
       }
 
       const map = L.map(domNode, {
-        center: defaultCenter,
-        zoom: validList.length > 0 ? 11 : 5,
+        center: [17.385, 78.4867],
+        zoom: 11,
         zoomControl: false,
         scrollWheelZoom: false,
         doubleClickZoom: false,
@@ -69,67 +70,90 @@ const HeroMap: React.FC = () => {
         attributionControl: false,
       });
 
-      // Add zero-watermark dark tactical composite layer
-      const tileGroup = createTileLayerGroup(L, 'dark');
+      // Default STREET mode composite layer
+      const tileGroup = createTileLayerGroup(L, 'street');
       tileGroup.addTo(map);
 
-      // Plot real active incidents
-      validList.forEach((pin, i) => {
-        const priorityColor =
-          pin.priority === 'CRITICAL' || pin.priority === 'HIGH'
-            ? '#E10600'
-            : pin.priority === 'MEDIUM'
-            ? '#FFC400'
-            : '#22C55E';
-
-        const isPulse = pin.priority === 'HIGH' || pin.priority === 'CRITICAL';
-        const html = `
-          <div style="position:relative;width:32px;height:32px;animation:heroMarkerIn 0.5s ease-out ${i * 0.1}s both">
-            ${
-              isPulse
-                ? `<div style="position:absolute;inset:0;border-radius:50%;background:${priorityColor};opacity:0.25;animation:heroBeacon 2s ease-out ${i * 0.25}s infinite"></div>`
-                : ''
-            }
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${priorityColor};border:2px solid #0A0A0A;box-shadow:0 0 8px ${priorityColor}70;"></div>
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:5px;height:5px;border-radius:50%;background:white;opacity:0.95;"></div>
-          </div>`;
-
-        const icon = L.divIcon({
-          html,
-          className: '',
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
-        });
-
-        L.marker([pin.latitude, pin.longitude], { icon })
-          .addTo(map)
-          .bindTooltip(
-            `<div style="background:#0D0D0D;border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:8px 12px;color:#fff;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 10px 25px rgba(0,0,0,0.7);">
-              ${getCategoryEmoji(pin.category)} ${pin.title || pin.category} — ${pin.location || pin.complaint_number}
-            </div>`,
-            { permanent: false, direction: 'top', offset: [0, -10], opacity: 1 }
-          );
-      });
-
-      if (validList.length > 1) {
-        const bounds = validList.map((p) => [p.latitude, p.longitude] as [number, number]);
-        try {
-          map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
-        } catch {
-          // ignore
-        }
-      }
+      const markerGroup = L.layerGroup().addTo(map);
+      markerGroupRef.current = markerGroup;
 
       mapRef.current = map;
       setReady(true);
+
+      map.invalidateSize();
+      setTimeout(() => {
+        if (mapRef.current) mapRef.current.invalidateSize();
+      }, 100);
     });
 
     return () => {
       isMounted = false;
       mapRef.current?.remove();
       mapRef.current = null;
+      markerGroupRef.current = null;
     };
-  }, [incidents]);
+  }, []);
+
+  // Plot/update incident markers reactively when incidents data arrives
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletLibRef.current;
+    const markerGroup = markerGroupRef.current;
+    if (!map || !L || !markerGroup) return;
+
+    markerGroup.clearLayers();
+
+    const validList = incidents.filter((p) => validateCoordinates(p.latitude, p.longitude).valid);
+    if (validList.length === 0) return;
+
+    validList.forEach((pin, i) => {
+      const priorityColor =
+        pin.priority === 'CRITICAL' || pin.priority === 'HIGH'
+          ? '#E10600'
+          : pin.priority === 'MEDIUM'
+          ? '#FFC400'
+          : '#22C55E';
+
+      const isPulse = pin.priority === 'HIGH' || pin.priority === 'CRITICAL';
+      const html = `
+        <div style="position:relative;width:32px;height:32px;animation:heroMarkerIn 0.5s ease-out ${i * 0.08}s both">
+          ${
+            isPulse
+              ? `<div style="position:absolute;inset:0;border-radius:50%;background:${priorityColor};opacity:0.25;animation:heroBeacon 2s ease-out ${i * 0.2}s infinite"></div>`
+              : ''
+          }
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:${priorityColor};border:2px solid #0A0A0A;box-shadow:0 0 8px ${priorityColor}70;"></div>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:5px;height:5px;border-radius:50%;background:white;opacity:0.95;"></div>
+        </div>`;
+
+      const icon = L.divIcon({
+        html,
+        className: '',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+
+      const marker = L.marker([pin.latitude, pin.longitude], { icon });
+      marker.bindTooltip(
+        `<div style="background:#0D0D0D;border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:8px 12px;color:#fff;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 10px 25px rgba(0,0,0,0.7);">
+          ${getCategoryEmoji(pin.category)} ${pin.title || pin.category} — ${pin.location || pin.complaint_number}
+        </div>`,
+        { permanent: false, direction: 'top', offset: [0, -10], opacity: 1 }
+      );
+      markerGroup.addLayer(marker);
+    });
+
+    if (validList.length > 1) {
+      const bounds = validList.map((p) => [p.latitude, p.longitude] as [number, number]);
+      try {
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
+      } catch {
+        // ignore
+      }
+    } else if (validList.length === 1) {
+      map.setView([validList[0].latitude, validList[0].longitude], 13);
+    }
+  }, [incidents, ready]);
 
   return (
     <div

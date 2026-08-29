@@ -109,7 +109,8 @@ const MapView: React.FC<MapViewProps> = ({
   const userCircleRef = useRef<LeafletCircle | null>(null);
   const leafletLibRef = useRef<typeof import('leaflet') | null>(null);
 
-  const [tileKey, setTileKey] = useState<MapTileMode>('dark');
+  const [tileKey, setTileKey] = useState<MapTileMode>('street');
+  const activeTileKeyRef = useRef<MapTileMode>('street');
   const [selected, setSelected] = useState<Complaint | null>(null);
   const [filter, setFilter] = useState<'all' | 'HIGH' | 'MEDIUM' | 'LOW'>('all');
   const [mapReady, setMapReady] = useState(false);
@@ -158,10 +159,11 @@ const MapView: React.FC<MapViewProps> = ({
           setCurrentZoom(Math.round(map.getZoom() * 10) / 10);
         });
 
-        // Composite tile layer group
-        const tileGroup = createTileLayerGroup(L, 'dark');
+        // Composite tile layer group (Default STREET mode)
+        const tileGroup = createTileLayerGroup(L, 'street');
         tileGroup.addTo(map);
         tileGroupRef.current = tileGroup;
+        activeTileKeyRef.current = 'street';
 
         mapRef.current = map;
         setMapReady(true);
@@ -173,7 +175,7 @@ const MapView: React.FC<MapViewProps> = ({
           if (mapRef.current) {
             mapRef.current.invalidateSize();
           }
-        }, 150);
+        }, 100);
       })
       .catch((err) => {
         console.error('[MapView] Error initializing Leaflet:', err);
@@ -213,9 +215,10 @@ const MapView: React.FC<MapViewProps> = ({
     return () => ro.disconnect();
   }, [mapReady]);
 
-  // Swap tile layer when user changes style
+  // Swap tile layer when user explicitly changes style
   useEffect(() => {
     if (!mapRef.current || !leafletLibRef.current || !mapReady) return;
+    if (activeTileKeyRef.current === tileKey && tileGroupRef.current) return;
     const L = leafletLibRef.current;
 
     if (tileGroupRef.current) {
@@ -225,6 +228,7 @@ const MapView: React.FC<MapViewProps> = ({
     const newGroup = createTileLayerGroup(L, tileKey);
     newGroup.addTo(mapRef.current);
     tileGroupRef.current = newGroup;
+    activeTileKeyRef.current = tileKey;
   }, [tileKey, mapReady]);
 
   // Plot verified complaint markers
@@ -422,7 +426,7 @@ const MapView: React.FC<MapViewProps> = ({
             <div className="flex items-center gap-1.5 px-1.5 py-1 text-[10px] text-white/40 font-bold uppercase tracking-wider font-mono">
               <Layers className="w-3 h-3" /> Map Mode
             </div>
-            {(['dark', 'satellite', 'street'] as MapTileMode[]).map((key) => (
+            {(['street', 'dark', 'satellite'] as MapTileMode[]).map((key) => (
               <button
                 key={key}
                 onClick={() => setTileKey(key)}
@@ -432,7 +436,7 @@ const MapView: React.FC<MapViewProps> = ({
                     : 'text-white/50 hover:text-white hover:bg-white/8'
                 }`}
               >
-                {key === 'dark' ? 'Dark' : key === 'satellite' ? 'Satellite' : 'Street'}
+                {key === 'street' ? 'Street' : key === 'dark' ? 'Dark' : 'Satellite'}
               </button>
             ))}
           </div>

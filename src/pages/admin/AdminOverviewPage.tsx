@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ClipboardList, AlertTriangle, CheckCircle, Clock, ArrowRight, Zap,
@@ -12,6 +12,7 @@ import AdminAIAssistant from '../../components/AdminAIAssistant';
 import { useAdminComplaints } from '../../hooks/useComplaints';
 import { SkeletonStat } from '../../components/SkeletonCard';
 import { formatDateTime, getCategoryEmoji, truncate } from '../../utils/helpers';
+import { validateCoordinates } from '../../utils/mapConfig';
 import { api } from '../../services/api';
 import PageTransition from '../../components/PageTransition';
 import { StaggerContainer, StaggerItem } from '../../components/StaggerContainer';
@@ -107,6 +108,25 @@ export default function AdminOverviewPage() {
   const highCount = overview?.high_priority ?? (loading ? 0 : highPriorityCases.length);
   const pendingCount = overview?.pending ?? (loading ? 0 : pendingCases.length);
   const resolvedCount = overview?.resolved ?? (loading ? 0 : resolvedCases.length);
+
+  const overviewMapMarkers = useMemo(
+    () =>
+      complaints
+        .filter((c) => validateCoordinates(c.latitude, c.longitude).valid)
+        .map((c) => ({
+          id: c.id,
+          complaintId: c.id,
+          x: 50,
+          y: 50,
+          priority: c.priority,
+          status: c.status,
+          category: c.category,
+          title: c.title,
+          department: c.department || '',
+          location: c.location || '',
+        })),
+    [complaints],
+  );
 
   const hasFatalError = (error || overviewError) && !overview && complaints.length === 0;
 
@@ -345,20 +365,7 @@ export default function AdminOverviewPage() {
           </div>
           <div className="h-[380px] relative">
             <MapView
-              markers={complaints
-                .filter((c) => c.latitude && c.longitude)
-                .map((c) => ({
-                  id: c.id,
-                  complaintId: c.id,
-                  x: 50,
-                  y: 50,
-                  priority: c.priority,
-                  status: c.status,
-                  category: c.category,
-                  title: c.title,
-                  department: c.department || '',
-                  location: c.location || '',
-                }))}
+              markers={overviewMapMarkers}
               complaints={complaints}
             />
           </div>
